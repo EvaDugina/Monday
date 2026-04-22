@@ -71,6 +71,8 @@ function App() {
   const [screen, setScreen] = useState<Screen>(() => getScreenFromPath(window.location.pathname));
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [isCreateModalOpen, setCreateModalOpen] = useState(false);
+  const [draggedTaskId, setDraggedTaskId] = useState<string | null>(null);
+  const [dropTargetCategory, setDropTargetCategory] = useState<Category | null>(null);
   const [syncStatus, setSyncStatus] = useState<SyncStatus>('syncing');
   const [syncTooltip, setSyncTooltip] = useState('Подключаемся к серверу…');
   const latestTasksRef = useRef(tasks);
@@ -205,6 +207,8 @@ function App() {
     .sort((left, right) => (right.closedAt ?? '').localeCompare(left.closedAt ?? ''));
   const selectedTask =
     tasks.find((task) => task.id === selectedTaskId && task.status === 'open') ?? null;
+  const draggedTask =
+    tasks.find((task) => task.id === draggedTaskId && task.status === 'open') ?? null;
 
   function navigateToScreen(nextScreen: Screen) {
     window.history.pushState({}, '', getPathForScreen(nextScreen));
@@ -280,6 +284,39 @@ function App() {
     setSelectedTaskId((current) => (current === taskId ? null : current));
   }
 
+  function startTaskDrag(taskId: string) {
+    setDraggedTaskId(taskId);
+  }
+
+  function updateDropTarget(category: Category | null) {
+    setDropTargetCategory((current) => (current === category ? current : category));
+  }
+
+  function endTaskDrag() {
+    setDraggedTaskId(null);
+    setDropTargetCategory(null);
+  }
+
+  function moveTaskToCategory(taskId: string, nextCategory: Category) {
+    setTasks((current) => {
+      let hasChanged = false;
+
+      const nextTasks = current.map((task) => {
+        if (task.id !== taskId || task.status !== 'open' || task.category === nextCategory) {
+          return task;
+        }
+
+        hasChanged = true;
+        return {
+          ...task,
+          category: nextCategory,
+        };
+      });
+
+      return hasChanged ? nextTasks : current;
+    });
+  }
+
   return (
     <div className="app">
       <div className="app__inner">
@@ -305,6 +342,10 @@ function App() {
                     category={category.key}
                     label={category.label}
                     tasks={tasksForCategory}
+                    draggedTaskId={draggedTaskId}
+                    draggedTaskCategory={draggedTask?.category ?? null}
+                    isDropTarget={dropTargetCategory === category.key}
+                    onDropTargetChange={updateDropTarget}
                     onCreate={(title) =>
                       createTask({
                         title,
@@ -313,6 +354,9 @@ function App() {
                         deadline: { kind: 'none' },
                       })
                     }
+                    onTaskDragStart={startTaskDrag}
+                    onTaskDragEnd={endTaskDrag}
+                    onTaskDrop={moveTaskToCategory}
                     onTaskOpen={setSelectedTaskId}
                     onQuickClose={archiveTask}
                   />

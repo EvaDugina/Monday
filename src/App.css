@@ -184,6 +184,16 @@
 .category-section {
   display: grid;
   gap: 16px;
+  padding: 12px 14px 14px;
+  border-radius: 12px;
+  transition:
+    background-color 120ms ease,
+    box-shadow 120ms ease;
+}
+
+.category-section--drop-target {
+  background: color-mix(in srgb, var(--category-color, var(--text)) 8%, var(--surface));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--category-color, var(--text)) 35%, transparent);
 }
 
 .category-section__header {
@@ -224,11 +234,15 @@
 
 .task-card {
   display: grid;
-  grid-template-columns: 22px 1fr;
+  grid-template-columns: 22px 1fr 20px;
   align-items: start;
   gap: 6px;
   padding: 4px 6px;
   border-radius: 4px;
+}
+
+.task-card--dragging {
+  opacity: 0.45;
 }
 
 .task-card:hover {
@@ -253,6 +267,26 @@
 .task-card__checkbox:hover {
   background: var(--hover);
   border-color: rgba(55, 53, 47, 0.6);
+}
+
+.task-card__drag-handle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  justify-self: end;
+  width: 20px;
+  min-height: 22px;
+  margin-top: 1px;
+  color: rgba(55, 53, 47, 0.35);
+  cursor: grab;
+}
+
+.task-card__drag-handle:hover {
+  color: var(--muted);
+}
+
+.task-card__drag-handle:active {
+  cursor: grabbing;
 }
 
 .task-card__main {
