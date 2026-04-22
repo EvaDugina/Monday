@@ -1,0 +1,20 @@
+{
+  "name": "monday-api",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.8.1",
+    "express": "^4.21.2"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.12",
+    "@types/express": "^5.0.1",
+    "@types/node": "^22.13.10",
+    "typescript": "^5.8.2"
+  }
+}

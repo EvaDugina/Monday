@@ -1,10 +1,11 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { pullTasksFromServer, pushTasksToServer } from './api';
 import ArchiveList from './components/ArchiveList';
 import CategorySection from './components/CategorySection';
 import CreateTaskModal from './components/CreateTaskModal';
 import Header from './components/Header';
 import TaskDetailsModal from './components/TaskDetailsModal';
-import { loadTasks, saveTasks } from './storage';
+import { loadTasks, sanitizeTasks, saveTasks, serializeTasks } from './storage';
 import type { Category, Deadline, Screen, Task } from './types';
 import { compareIsoDates } from './utils/dates';
 
@@ -54,14 +55,30 @@ function normalizeDeadline(deadline: Deadline): Deadline {
   }
 }
 
+type SyncStatus = 'synced' | 'syncing' | 'offline';
+
+function formatSyncedTooltip(updatedAt: string): string {
+  const formatted = new Intl.DateTimeFormat('ru-RU', {
+    dateStyle: 'short',
+    timeStyle: 'medium',
+  }).format(new Date(updatedAt));
+
+  return `Синхронизировано с сервером: ${formatted}`;
+}
+
 function App() {
   const [tasks, setTasks] = useState<Task[]>(() => loadTasks());
   const [screen, setScreen] = useState<Screen>(() => getScreenFromPath(window.location.pathname));
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [isCreateModalOpen, setCreateModalOpen] = useState(false);
+  const [syncStatus, setSyncStatus] = useState<SyncStatus>('syncing');
+  const [syncTooltip, setSyncTooltip] = useState('Подключаемся к серверу…');
+  const latestTasksRef = useRef(tasks);
+  const lastSyncedJsonRef = useRef(serializeTasks(tasks));
+  const hasInitializedSyncRef = useRef(false);
 
   useEffect(() => {
-    saveTasks(tasks);
+    latestTasksRef.current = tasks;
   }, [tasks]);
 
   useEffect(() => {
@@ -78,6 +95,109 @@ function App() {
       setSelectedTaskId(null);
     }
   }, [selectedTaskId, tasks]);
+
+  useEffect(() => {
+    let isCancelled = false;
+
+    async function bootstrapSync() {
+      try {
+        const serverState = await pullTasksFromServer();
+
+        if (isCancelled) {
+          return;
+        }
+
+        const serverTasks = sanitizeTasks(serverState.tasks);
+        const serverJson = serializeTasks(serverTasks);
+        const localTasks = latestTasksRef.current;
+        const localJson = serializeTasks(localTasks);
+
+        if (serverTasks.length === 0 && localTasks.length > 0) {
+          const seededState = await pushTasksToServer(localTasks);
+
+          if (isCancelled) {
+            return;
+          }
+
+          saveTasks(localTasks);
+          lastSyncedJsonRef.current = localJson;
+          setSyncStatus('synced');
+          setSyncTooltip(formatSyncedTooltip(seededState.updatedAt));
+          return;
+        }
+
+        setTasks(serverTasks);
+        saveTasks(serverTasks);
+        lastSyncedJsonRef.current = serverJson;
+        setSyncStatus('synced');
+        setSyncTooltip(formatSyncedTooltip(serverState.updatedAt));
+      } catch (error) {
+        if (isCancelled) {
+          return;
+        }
+
+        lastSyncedJsonRef.current = serializeTasks(latestTasksRef.current);
+        setSyncStatus('offline');
+        setSyncTooltip('Сервер недоступен, работаем из localStorage.');
+      } finally {
+        if (!isCancelled) {
+          hasInitializedSyncRef.current = true;
+        }
+      }
+    }
+
+    void bootstrapSync();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!hasInitializedSyncRef.current) {
+      return;
+    }
+
+    const nextJson = serializeTasks(tasks);
+
+    if (nextJson === lastSyncedJsonRef.current) {
+      return;
+    }
+
+    let isCancelled = false;
+    setSyncStatus('syncing');
+    setSyncTooltip('Сохраняем изменения и отправляем их на сервер…');
+
+    const timeoutId = window.setTimeout(() => {
+      void (async () => {
+        saveTasks(tasks);
+
+        try {
+          const nextState = await pushTasksToServer(tasks);
+
+          if (isCancelled) {
+            return;
+          }
+
+          lastSyncedJsonRef.current = nextJson;
+          setSyncStatus('synced');
+          setSyncTooltip(formatSyncedTooltip(nextState.updatedAt));
+        } catch (error) {
+          if (isCancelled) {
+            return;
+          }
+
+          setSyncStatus('offline');
+          setSyncTooltip('Сервер недоступен, изменения сохранены только локально.');
+        }
+      })();
+    }, 500);
+
+    return () => {
+      isCancelled = true;
+      window.clearTimeout(timeoutId);
+    };
+  }, [tasks]);
 
   const openTasks = tasks.filter((task) => task.status === 'open');
   const archiveTasks = [...tasks]
@@ -165,6 +285,8 @@ function App() {
       <div className="app__inner">
         <Header
           screen={screen}
+          syncStatus={syncStatus}
+          syncTooltip={syncTooltip}
           onToggleScreen={() => navigateToScreen(screen === 'active' ? 'archive' : 'active')}
           onCreate={() => setCreateModalOpen(true)}
         />
@@ -173,7 +295,9 @@ function App() {
           <main className="screen">
             <div className="sections">
               {CATEGORIES.map((category) => {
-                const tasksForCategory = openTasks.filter((task) => task.category === category.key);
+                const tasksForCategory = openTasks
+                  .filter((task) => task.category === category.key)
+                  .sort((left, right) => left.createdAt.localeCompare(right.createdAt));
 
                 return (
                   <CategorySection

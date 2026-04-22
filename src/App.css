@@ -29,7 +29,35 @@
 
 .header__actions {
   display: flex;
+  align-items: center;
   gap: 20px;
+}
+
+.sync-status {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+}
+
+.sync-status__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--sync-pending);
+}
+
+.sync-status__dot--synced {
+  background: var(--sync-ok);
+}
+
+.sync-status__dot--syncing {
+  background: var(--sync-pending);
+}
+
+.sync-status__dot--offline {
+  background: var(--sync-offline);
 }
 
 /* Buttons */
@@ -592,6 +620,10 @@
     flex-direction: column;
     align-items: flex-start;
     gap: 12px;
+  }
+
+  .header__actions {
+    flex-wrap: wrap;
   }
 
   .category-section__title {
