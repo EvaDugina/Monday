@@ -6,6 +6,7 @@ interface CategorySectionProps {
   category: Category;
   label: string;
   tasks: Task[];
+  selectedTaskId: string | null;
   draggedTaskId: string | null;
   draggedTaskCategory: Category | null;
   isDropTarget: boolean;
@@ -22,6 +23,7 @@ function CategorySection({
   category,
   label,
   tasks,
+  selectedTaskId,
   draggedTaskId,
   draggedTaskCategory,
   isDropTarget,
@@ -128,6 +130,7 @@ function CategorySection({
               key={task.id}
               task={task}
               isDragging={task.id === draggedTaskId}
+              isSelected={task.id === selectedTaskId}
               onDragStart={() => onTaskDragStart(task.id)}
               onDragEnd={onTaskDragEnd}
               onOpen={() => onTaskOpen(task.id)}

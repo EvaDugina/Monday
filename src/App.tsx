@@ -211,6 +211,10 @@ function App() {
     tasks.find((task) => task.id === draggedTaskId && task.status === 'open') ?? null;
 
   function navigateToScreen(nextScreen: Screen) {
+    if (nextScreen === screen) {
+      return;
+    }
+
     window.history.pushState({}, '', getPathForScreen(nextScreen));
     setScreen(nextScreen);
     setSelectedTaskId(null);
@@ -324,12 +328,12 @@ function App() {
           screen={screen}
           syncStatus={syncStatus}
           syncTooltip={syncTooltip}
-          onToggleScreen={() => navigateToScreen(screen === 'active' ? 'archive' : 'active')}
+          onNavigate={navigateToScreen}
           onCreate={() => setCreateModalOpen(true)}
         />
 
-        {screen === 'active' ? (
-          <main className="screen">
+        <main key={screen} className={`screen screen--${screen}`}>
+          {screen === 'active' ? (
             <div className="sections">
               {CATEGORIES.map((category) => {
                 const tasksForCategory = openTasks
@@ -342,6 +346,7 @@ function App() {
                     category={category.key}
                     label={category.label}
                     tasks={tasksForCategory}
+                    selectedTaskId={selectedTaskId}
                     draggedTaskId={draggedTaskId}
                     draggedTaskCategory={draggedTask?.category ?? null}
                     isDropTarget={dropTargetCategory === category.key}
@@ -363,17 +368,15 @@ function App() {
                 );
               })}
             </div>
-          </main>
-        ) : (
-          <main className="screen">
+          ) : (
             <ArchiveList
               tasks={archiveTasks}
               categories={CATEGORIES}
               onRestore={restoreTask}
               onDelete={deleteTask}
             />
-          </main>
-        )}
+          )}
+        </main>
       </div>
 
       <TaskDetailsModal
