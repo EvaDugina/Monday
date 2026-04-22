@@ -112,8 +112,8 @@ function TaskDetailsModal({ task, onClose, onSave, onArchive, onDelete }: TaskDe
           </label>
         </div>
 
-        <div className="modal__footer modal__footer--split">
-          <div className="modal__danger-zone">
+        <div className="modal__footer">
+          <div className="modal__footer-group">
             <button type="button" className="button button--danger" onClick={() => onDelete(currentTask.id)}>
               Удалить навсегда
             </button>

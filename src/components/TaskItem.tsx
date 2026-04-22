@@ -5,25 +5,16 @@ import { getUrgency } from '../utils/urgency';
 interface TaskItemProps {
   task: Task;
   isDragging?: boolean;
-  isSelected?: boolean;
   onDragStart?: () => void;
   onDragEnd?: () => void;
   onOpen: () => void;
   onQuickClose?: () => void;
 }
 
-function TaskItem({
-  task,
-  isDragging = false,
-  isSelected = false,
-  onDragStart,
-  onDragEnd,
-  onOpen,
-  onQuickClose,
-}: TaskItemProps) {
+function TaskItem({ task, isDragging = false, onDragStart, onDragEnd, onOpen, onQuickClose }: TaskItemProps) {
   const urgency = getUrgency(task.deadline);
 
-  function handleDragStart(event: React.DragEvent<HTMLButtonElement>) {
+  function handleDragStart(event: React.DragEvent<HTMLDivElement>) {
     event.dataTransfer.effectAllowed = 'move';
     event.dataTransfer.setData('application/x-monday-task-id', task.id);
     event.dataTransfer.setData('application/x-monday-task-category', task.category);
@@ -32,10 +23,7 @@ function TaskItem({
   }
 
   return (
-    <article
-      className={`task-card${isDragging ? ' task-card--dragging' : ''}${isSelected ? ' task-card--selected' : ''}`}
-      data-category={task.category}
-    >
+    <article className={`task-card${isDragging ? ' task-card--dragging' : ''}`} data-category={task.category}>
       {onQuickClose && (
         <button
           type="button"
@@ -45,7 +33,7 @@ function TaskItem({
         />
       )}
 
-      <button type="button" className="task-card__main" onClick={onOpen} title="Открыть задачу">
+      <button type="button" className="task-card__main" onClick={onOpen} title="Перетащите задачу в другой раздел">
         <div className="task-card__headline">
           {task.urgent && <span className="task-card__urgent-badge">СРОЧНО</span>}
           <span className="task-card__title">{task.title}</span>
@@ -71,10 +59,11 @@ function TaskItem({
         )}
       </button>
 
-      <button
-        type="button"
+      <div
         className="task-card__drag-handle"
         draggable
+        role="button"
+        tabIndex={0}
         aria-label="Перетащить задачу в другой раздел"
         aria-grabbed={isDragging}
         onDragStart={handleDragStart}
@@ -82,7 +71,7 @@ function TaskItem({
         title="Перетащить задачу в другой раздел"
       >
         <GripVertical size={15} strokeWidth={1.75} aria-hidden="true" />
-      </button>
+      </div>
     </article>
   );
 }

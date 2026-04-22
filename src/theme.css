@@ -15,17 +15,11 @@
 
   --bg: #ffffff;
   --surface: #ffffff;
-  --surface-muted: #f7f5f2;
   --text: #37352f;
   --muted: #787774;
   --border: rgba(55, 53, 47, 0.09);
   --border-strong: rgba(55, 53, 47, 0.16);
   --hover: rgba(55, 53, 47, 0.04);
-  --hover-strong: rgba(55, 53, 47, 0.08);
-  --focus-ring: rgba(0, 47, 167, 0.16);
-  --selected-bg: rgba(0, 47, 167, 0.06);
-  --selected-border: rgba(0, 47, 167, 0.18);
-  --danger-soft: rgba(212, 76, 71, 0.1);
   --overlay: rgba(15, 15, 15, 0.4);
 }
 
@@ -60,14 +54,7 @@ body {
 
 button,
 input,
-textarea,
-select {
+textarea {
   font: inherit;
   color: inherit;
-}
-
-input[type='checkbox'] {
-  width: 16px;
-  height: 16px;
-  accent-color: var(--text);
 }
