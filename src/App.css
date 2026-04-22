@@ -1,0 +1,621 @@
+.app {
+  min-height: 100vh;
+  padding: 64px 24px 120px;
+}
+
+.app__inner {
+  width: min(100%, 720px);
+  margin: 0 auto;
+  display: grid;
+  gap: 48px;
+}
+
+/* Header */
+
+.header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  padding-bottom: 12px;
+}
+
+.header__title {
+  margin: 0;
+  font-size: 1.25rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.header__actions {
+  display: flex;
+  gap: 20px;
+}
+
+/* Buttons */
+
+.link-button {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 0.9rem;
+  font-weight: 500;
+}
+
+.link-button:hover {
+  color: var(--text);
+}
+
+.button {
+  padding: 6px 14px;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+  font-size: 0.9rem;
+  font-weight: 500;
+}
+
+.button:hover {
+  background: var(--hover);
+}
+
+.button--primary {
+  background: var(--text);
+  border-color: var(--text);
+  color: #ffffff;
+}
+
+.button--primary:hover {
+  background: #1f1e1b;
+}
+
+.button--secondary {
+  background: var(--surface);
+}
+
+.button--danger {
+  border-color: transparent;
+  background: transparent;
+  color: var(--urgent);
+}
+
+.button--danger:hover {
+  background: var(--urgent-bg);
+}
+
+.button--ghost {
+  border-color: transparent;
+  background: transparent;
+  color: var(--muted);
+}
+
+.button--ghost:hover {
+  color: var(--text);
+  background: var(--hover);
+}
+
+/* Screen / sections */
+
+.screen {
+  display: grid;
+}
+
+.sections {
+  display: grid;
+  gap: 96px;
+}
+
+.archive-list {
+  display: grid;
+}
+
+.task-list {
+  display: grid;
+  gap: 1px;
+}
+
+/* Chips (used only in CreateTaskModal category picker) */
+
+.category-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.chip {
+  padding: 5px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 0.88rem;
+  transition:
+    background-color 120ms ease,
+    color 120ms ease,
+    border-color 120ms ease;
+}
+
+.chip:hover {
+  color: var(--text);
+  background: var(--hover);
+}
+
+.chip--active {
+  color: var(--text);
+  border-color: color-mix(in srgb, var(--category-color, var(--text)) 50%, transparent);
+  background: color-mix(in srgb, var(--category-color, var(--text)) 10%, var(--surface));
+}
+
+/* Category section ("page") */
+
+.category-section {
+  display: grid;
+  gap: 16px;
+}
+
+.category-section__header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.category-section__title {
+  margin: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 1.75rem;
+  font-weight: 700;
+  letter-spacing: -0.015em;
+  line-height: 1.2;
+}
+
+.category-section__dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--category-color);
+}
+
+.category-section__count {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 0.85rem;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Task row (Notion todo block) */
+
+.task-card {
+  display: grid;
+  grid-template-columns: 22px 1fr;
+  align-items: start;
+  gap: 6px;
+  padding: 4px 6px;
+  border-radius: 4px;
+}
+
+.task-card:hover {
+  background: var(--hover);
+}
+
+.task-card__checkbox {
+  justify-self: start;
+  width: 18px;
+  height: 18px;
+  margin-top: 3px;
+  padding: 0;
+  border: 1.5px solid rgba(55, 53, 47, 0.35);
+  border-radius: 4px;
+  background: transparent;
+  cursor: pointer;
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease;
+}
+
+.task-card__checkbox:hover {
+  background: var(--hover);
+  border-color: rgba(55, 53, 47, 0.6);
+}
+
+.task-card__main {
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.task-card__headline {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.task-card__title {
+  font-size: 1rem;
+  line-height: 1.55;
+  font-weight: 400;
+}
+
+.task-card__description {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  margin: 2px 0 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+
+.task-card__meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.task-card__meta-icon {
+  color: var(--muted);
+}
+
+.task-card__meta-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+}
+
+.task-card__meta-dot--urgent {
+  background: var(--urgent);
+}
+
+.task-card__meta-dot--soon {
+  background: var(--soon);
+}
+
+.task-card__deadline--urgent {
+  color: var(--urgent);
+}
+
+.task-card__deadline--soon {
+  color: var(--soon);
+}
+
+/* Urgent badge (Notion soft tag) */
+
+.task-card__urgent-badge {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 3px;
+  background: var(--urgent-bg);
+  color: var(--urgent);
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
+/* Inline creator */
+
+.inline-creator {
+  margin-top: 4px;
+}
+
+.inline-creator .text-input {
+  padding: 4px 6px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text);
+  font-size: 0.95rem;
+}
+
+.inline-creator .text-input::placeholder {
+  color: rgba(55, 53, 47, 0.4);
+}
+
+.inline-creator .text-input:hover {
+  background: var(--hover);
+}
+
+.inline-creator .text-input:focus {
+  outline: none;
+  background: var(--hover);
+}
+
+/* Empty state */
+
+.empty-state {
+  padding: 4px 6px;
+  color: rgba(55, 53, 47, 0.4);
+  font-size: 0.92rem;
+}
+
+/* Modal */
+
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 24px 16px;
+  background: var(--overlay);
+  z-index: 20;
+}
+
+.modal {
+  width: min(100%, 640px);
+  max-height: min(92vh, 800px);
+  overflow: auto;
+  padding: 28px;
+  border-radius: 8px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  box-shadow: 0 6px 24px rgba(15, 15, 15, 0.12);
+}
+
+.modal h2 {
+  margin: 0;
+  font-size: 1.3rem;
+  font-weight: 700;
+  letter-spacing: -0.005em;
+}
+
+.modal__header,
+.modal__footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.modal__body {
+  display: grid;
+  gap: 18px;
+  margin: 20px 0 24px;
+}
+
+.modal__footer-group {
+  display: flex;
+  gap: 8px;
+}
+
+/* Form fields */
+
+.form-field {
+  display: grid;
+  gap: 6px;
+}
+
+.form-field--inline {
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  gap: 8px;
+}
+
+.form-label {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.text-input {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  background: var(--surface);
+  color: var(--text);
+}
+
+.text-input:focus {
+  outline: none;
+  border-color: var(--text);
+}
+
+.text-input--textarea {
+  resize: vertical;
+  min-height: 100px;
+}
+
+/* Deadline editor */
+
+.deadline-editor {
+  display: grid;
+  gap: 10px;
+}
+
+.deadline-editor__modes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.deadline-editor__grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.radio-pill {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  cursor: pointer;
+}
+
+.radio-pill input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+}
+
+.radio-pill span {
+  padding: 5px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 0.88rem;
+}
+
+.radio-pill input:checked + span {
+  color: var(--text);
+  border-color: var(--text);
+  background: var(--hover);
+}
+
+/* Archive list */
+
+.archive-item {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 16px;
+  align-items: start;
+  padding: 16px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.archive-item:last-child {
+  border-bottom: 0;
+}
+
+.archive-item__content {
+  min-width: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.archive-item__topline {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.archive-item__dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--category-color);
+}
+
+.archive-item__time {
+  margin-left: auto;
+}
+
+.archive-item__content h3 {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.archive-item__description {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+
+.archive-item__deadline {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.archive-item__actions {
+  display: flex;
+  gap: 8px;
+}
+
+/* Category color binding */
+
+.chip[data-category='passion'],
+.category-section[data-category='passion'],
+.task-card[data-category='passion'],
+.archive-item[data-category='passion'] {
+  --category-color: var(--cat-passion);
+}
+
+.chip[data-category='routine'],
+.category-section[data-category='routine'],
+.task-card[data-category='routine'],
+.archive-item[data-category='routine'] {
+  --category-color: var(--cat-routine);
+}
+
+.chip[data-category='body'],
+.category-section[data-category='body'],
+.task-card[data-category='body'],
+.archive-item[data-category='body'] {
+  --category-color: var(--cat-body);
+}
+
+.chip[data-category='projects'],
+.category-section[data-category='projects'],
+.task-card[data-category='projects'],
+.archive-item[data-category='projects'] {
+  --category-color: var(--cat-projects);
+}
+
+/* Responsive */
+
+@media (max-width: 640px) {
+  .app {
+    padding: 32px 16px 80px;
+  }
+
+  .app__inner {
+    gap: 32px;
+  }
+
+  .sections {
+    gap: 64px;
+  }
+
+  .header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
+  }
+
+  .category-section__title {
+    font-size: 1.5rem;
+  }
+
+  .modal {
+    padding: 20px;
+  }
+
+  .modal__footer {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .modal__footer-group {
+    flex-wrap: wrap;
+  }
+
+  .deadline-editor__grid {
+    grid-template-columns: 1fr;
+  }
+
+  .archive-item {
+    grid-template-columns: 1fr;
+  }
+}
