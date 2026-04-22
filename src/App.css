@@ -20,6 +20,12 @@
   padding-bottom: 12px;
 }
 
+.header__brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .header__title {
   margin: 0;
   font-size: 1.25rem;
@@ -37,8 +43,8 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 18px;
-  height: 18px;
+  width: 10px;
+  height: 10px;
 }
 
 .sync-status__dot {

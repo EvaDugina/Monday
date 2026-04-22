@@ -15,9 +15,8 @@ function Header({ screen, syncStatus, syncTooltip, onToggleScreen, onCreate }: H
 
   return (
     <header className="header">
-      <h1 className="header__title">MONDAY</h1>
-
-      <nav className="header__actions">
+      <div className="header__brand">
+        <h1 className="header__title">MONDAY</h1>
         <span
           className="sync-status"
           title={syncTooltip}
@@ -28,6 +27,9 @@ function Header({ screen, syncStatus, syncTooltip, onToggleScreen, onCreate }: H
             aria-hidden="true"
           />
         </span>
+      </div>
+
+      <nav className="header__actions">
         {!isArchive && onCreate && (
           <button type="button" className="link-button" onClick={onCreate}>
             + Новая задача
