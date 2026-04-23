@@ -24,6 +24,7 @@
   display: inline-flex;
   align-items: center;
   gap: 8px;
+  flex-wrap: wrap;
 }
 
 .header__title {
@@ -43,15 +44,33 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 10px;
-  height: 10px;
+  gap: 6px;
+  min-height: 10px;
 }
 
 .sync-status__dot {
+  appearance: none;
   width: 8px;
   height: 8px;
+  padding: 0;
+  border: 0;
   border-radius: 50%;
   background: var(--sync-pending);
+  cursor: pointer;
+  transition:
+    transform 120ms ease,
+    box-shadow 120ms ease,
+    opacity 120ms ease;
+}
+
+.sync-status__dot:hover:not(:disabled) {
+  transform: scale(1.15);
+  box-shadow: 0 0 0 4px color-mix(in srgb, currentColor 8%, transparent);
+}
+
+.sync-status__dot:disabled {
+  cursor: wait;
+  opacity: 0.8;
 }
 
 .sync-status__dot--synced {
@@ -64,6 +83,25 @@
 
 .sync-status__dot--offline {
   background: var(--sync-offline);
+}
+
+.sync-status__dot--conflict {
+  background: var(--urgent);
+}
+
+.sync-status__dot:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--text) 14%, transparent);
+}
+
+.sync-status__label {
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.header__identity {
+  color: var(--muted);
+  font-size: 0.82rem;
 }
 
 /* Buttons */
@@ -136,6 +174,38 @@
 
 .screen {
   display: grid;
+}
+
+.sync-alert {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 16px;
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  background: var(--surface);
+}
+
+.sync-alert--conflict {
+  border-color: color-mix(in srgb, var(--urgent) 26%, transparent);
+  background: color-mix(in srgb, var(--urgent) 7%, var(--surface));
+}
+
+.sync-alert__copy {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.sync-alert__copy strong {
+  font-size: 0.95rem;
+}
+
+.sync-alert__copy span {
+  color: var(--muted);
+  font-size: 0.88rem;
+  line-height: 1.5;
 }
 
 .sections {
@@ -664,6 +734,11 @@
 
   .header__actions {
     flex-wrap: wrap;
+  }
+
+  .sync-alert {
+    flex-direction: column;
+    align-items: flex-start;
   }
 
   .category-section__title {

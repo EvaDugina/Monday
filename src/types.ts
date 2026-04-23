@@ -19,3 +19,32 @@ export interface Task {
 }
 
 export type Screen = 'active' | 'archive';
+
+export interface ServerTasksState {
+  tasks: Task[];
+  updatedAt: string;
+  version: number;
+}
+
+export interface SaveTasksResponse {
+  updatedAt: string;
+  version: number;
+}
+
+export type BackupSource = 'auto' | 'manual';
+
+export interface BackupSnapshotResponse {
+  created: boolean;
+  createdAt: string;
+  retainedBackups: number;
+  source: BackupSource;
+  stateUpdatedAt: string;
+  stateVersion: number;
+  reason?: 'unchanged';
+}
+
+export interface CurrentUser {
+  email: string;
+  name: string | null;
+  groups: string[];
+}

@@ -1,12 +1,28 @@
 import { useEffect, useRef, useState } from 'react';
-import { pullTasksFromServer, pushTasksToServer } from './api';
+import {
+  ApiError,
+  createBackupSnapshot,
+  fetchCurrentUser,
+  isConflictStatePayload,
+  pullTasksFromServer,
+  pushTasksToServer,
+} from './api';
 import ArchiveList from './components/ArchiveList';
 import CategorySection from './components/CategorySection';
 import CreateTaskModal from './components/CreateTaskModal';
 import Header from './components/Header';
 import TaskDetailsModal from './components/TaskDetailsModal';
-import { loadTasks, sanitizeTasks, saveTasks, serializeTasks } from './storage';
-import type { Category, Deadline, Screen, Task } from './types';
+import { loadLocalState, sanitizeTasks, saveLocalState, serializeTasks } from './storage';
+import type {
+  BackupSnapshotResponse,
+  BackupSource,
+  Category,
+  CurrentUser,
+  Deadline,
+  Screen,
+  ServerTasksState,
+  Task,
+} from './types';
 import { compareIsoDates } from './utils/dates';
 
 const CATEGORIES: Array<{ key: Category; label: string }> = [
@@ -15,6 +31,9 @@ const CATEGORIES: Array<{ key: Category; label: string }> = [
   { key: 'body', label: 'Тело' },
   { key: 'projects', label: 'Projects' },
 ];
+const AUTO_BACKUP_INTERVAL_MS = 5 * 60_000;
+const DEFAULT_BACKUP_TOOLTIP =
+  'Резервные копии создаются автоматически раз в 5 минут. Нажмите на точку, чтобы создать снимок сейчас.';
 
 function getScreenFromPath(pathname: string): Screen {
   return pathname.startsWith('/archive') ? 'archive' : 'active';
@@ -55,33 +74,83 @@ function normalizeDeadline(deadline: Deadline): Deadline {
   }
 }
 
-type SyncStatus = 'synced' | 'syncing' | 'offline';
+type SyncStatus = 'synced' | 'syncing' | 'offline' | 'conflict';
 
-function formatSyncedTooltip(updatedAt: string): string {
-  const formatted = new Intl.DateTimeFormat('ru-RU', {
+function formatDateTime(timestamp: string): string {
+  return new Intl.DateTimeFormat('ru-RU', {
     dateStyle: 'short',
     timeStyle: 'medium',
-  }).format(new Date(updatedAt));
+  }).format(new Date(timestamp));
+}
 
-  return `Синхронизировано с сервером: ${formatted}`;
+function formatSyncedTooltip(updatedAt: string): string {
+  return `Синхронизировано с сервером: ${formatDateTime(updatedAt)}`;
+}
+
+function formatBackupTooltip(result: BackupSnapshotResponse): string {
+  const backupTime = formatDateTime(result.createdAt);
+  const snapshotTime = formatDateTime(result.stateUpdatedAt);
+  const actionLabel = result.created ? 'Резервная копия создана' : 'Последняя резервная копия уже актуальна';
+
+  return `${actionLabel}: ${backupTime}. Снимок состояния: ${snapshotTime}. Храним последние ${result.retainedBackups} бэкапа на пользователя.`;
 }
 
 function App() {
-  const [tasks, setTasks] = useState<Task[]>(() => loadTasks());
+  const initialStateRef = useRef<ReturnType<typeof loadLocalState> | null>(null);
+
+  if (!initialStateRef.current) {
+    initialStateRef.current = loadLocalState();
+  }
+
+  const initialState = initialStateRef.current;
+
+  const [tasks, setTasks] = useState<Task[]>(() => initialState.tasks);
+  const [serverVersion, setServerVersion] = useState<number | null>(() => initialState.version);
+  const [serverUpdatedAt, setServerUpdatedAt] = useState<string | null>(() => initialState.updatedAt);
   const [screen, setScreen] = useState<Screen>(() => getScreenFromPath(window.location.pathname));
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [isCreateModalOpen, setCreateModalOpen] = useState(false);
   const [draggedTaskId, setDraggedTaskId] = useState<string | null>(null);
   const [dropTargetCategory, setDropTargetCategory] = useState<Category | null>(null);
+  const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
+  const [conflictState, setConflictState] = useState<ServerTasksState | null>(null);
   const [syncStatus, setSyncStatus] = useState<SyncStatus>('syncing');
   const [syncTooltip, setSyncTooltip] = useState('Подключаемся к серверу…');
+  const [backupTooltip, setBackupTooltip] = useState(DEFAULT_BACKUP_TOOLTIP);
+  const [isBackuping, setIsBackuping] = useState(false);
   const latestTasksRef = useRef(tasks);
+  const serverVersionRef = useRef(serverVersion);
+  const syncStatusRef = useRef<SyncStatus>(syncStatus);
+  const conflictStateRef = useRef<ServerTasksState | null>(conflictState);
   const lastSyncedJsonRef = useRef(serializeTasks(tasks));
+  const lastBackedUpVersionRef = useRef<number | null>(null);
   const hasInitializedSyncRef = useRef(false);
+  const backupInFlightRef = useRef(false);
+  const backupRunnerRef = useRef<(source: BackupSource) => void>(() => undefined);
 
   useEffect(() => {
     latestTasksRef.current = tasks;
   }, [tasks]);
+
+  useEffect(() => {
+    serverVersionRef.current = serverVersion;
+  }, [serverVersion]);
+
+  useEffect(() => {
+    syncStatusRef.current = syncStatus;
+  }, [syncStatus]);
+
+  useEffect(() => {
+    conflictStateRef.current = conflictState;
+  }, [conflictState]);
+
+  useEffect(() => {
+    saveLocalState({
+      tasks,
+      version: serverVersion,
+      updatedAt: serverUpdatedAt,
+    });
+  }, [serverUpdatedAt, serverVersion, tasks]);
 
   useEffect(() => {
     function handlePopState() {
@@ -101,6 +170,28 @@ function App() {
   useEffect(() => {
     let isCancelled = false;
 
+    void (async () => {
+      try {
+        const user = await fetchCurrentUser();
+
+        if (!isCancelled && user.email) {
+          setCurrentUser(user);
+        }
+      } catch {
+        if (!isCancelled) {
+          setCurrentUser(null);
+        }
+      }
+    })();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let isCancelled = false;
+
     async function bootstrapSync() {
       try {
         const serverState = await pullTasksFromServer();
@@ -115,22 +206,26 @@ function App() {
         const localJson = serializeTasks(localTasks);
 
         if (serverTasks.length === 0 && localTasks.length > 0) {
-          const seededState = await pushTasksToServer(localTasks);
+          const seededState = await pushTasksToServer(localTasks, serverState.version);
 
           if (isCancelled) {
             return;
           }
 
-          saveTasks(localTasks);
           lastSyncedJsonRef.current = localJson;
+          setServerVersion(seededState.version);
+          setServerUpdatedAt(seededState.updatedAt);
+          setConflictState(null);
           setSyncStatus('synced');
           setSyncTooltip(formatSyncedTooltip(seededState.updatedAt));
           return;
         }
 
         setTasks(serverTasks);
-        saveTasks(serverTasks);
         lastSyncedJsonRef.current = serverJson;
+        setServerVersion(serverState.version);
+        setServerUpdatedAt(serverState.updatedAt);
+        setConflictState(null);
         setSyncStatus('synced');
         setSyncTooltip(formatSyncedTooltip(serverState.updatedAt));
       } catch (error) {
@@ -155,8 +250,132 @@ function App() {
     };
   }, []);
 
+  async function waitForPendingSync(timeoutMs = 8_000): Promise<boolean> {
+    const startedAt = Date.now();
+
+    while (syncStatusRef.current === 'syncing') {
+      if (Date.now() - startedAt >= timeoutMs) {
+        return false;
+      }
+
+      await new Promise((resolve) => window.setTimeout(resolve, 150));
+    }
+
+    return true;
+  }
+
+  async function pushLatestTasksForBackup(): Promise<void> {
+    const nextTasks = latestTasksRef.current;
+    const nextJson = serializeTasks(nextTasks);
+
+    if (nextJson === lastSyncedJsonRef.current) {
+      return;
+    }
+
+    setSyncStatus('syncing');
+    setSyncTooltip('Сохраняем изменения перед созданием резервной копии…');
+
+    try {
+      const nextState = await pushTasksToServer(nextTasks, serverVersionRef.current ?? 0);
+
+      lastSyncedJsonRef.current = nextJson;
+      setServerVersion(nextState.version);
+      setServerUpdatedAt(nextState.updatedAt);
+      setConflictState(null);
+      setSyncStatus('synced');
+      setSyncTooltip(formatSyncedTooltip(nextState.updatedAt));
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 409 && isConflictStatePayload(error.payload)) {
+        setConflictState(error.payload);
+        setSyncStatus('conflict');
+        setSyncTooltip('На сервере есть более новая версия. Загрузите её перед следующей записью.');
+        throw error;
+      }
+
+      setSyncStatus('offline');
+      setSyncTooltip('Сервер недоступен, изменения сохранены только локально.');
+      throw error;
+    }
+  }
+
+  async function runBackup(source: BackupSource): Promise<void> {
+    if (backupInFlightRef.current) {
+      if (source === 'manual') {
+        setBackupTooltip('Резервное копирование уже выполняется. Подождите завершения текущего снимка.');
+      }
+      return;
+    }
+
+    if (source === 'auto') {
+      if (
+        document.visibilityState === 'hidden' ||
+        !hasInitializedSyncRef.current ||
+        syncStatusRef.current !== 'synced' ||
+        conflictStateRef.current !== null ||
+        lastBackedUpVersionRef.current === serverVersionRef.current ||
+        serializeTasks(latestTasksRef.current) !== lastSyncedJsonRef.current
+      ) {
+        return;
+      }
+    }
+
+    backupInFlightRef.current = true;
+    setIsBackuping(true);
+
+    try {
+      if (source === 'manual' && syncStatusRef.current === 'syncing') {
+        setBackupTooltip('Дожидаемся завершения синхронизации перед созданием резервной копии…');
+
+        const didSyncSettle = await waitForPendingSync();
+
+        if (!didSyncSettle) {
+          setBackupTooltip('Синхронизация не завершилась вовремя. Повторите создание резервной копии ещё раз.');
+          return;
+        }
+      }
+
+      if (conflictStateRef.current) {
+        setBackupTooltip('Сначала разрешите конфликт синхронизации, затем создайте резервную копию ещё раз.');
+        return;
+      }
+
+      if (source === 'manual' && serializeTasks(latestTasksRef.current) !== lastSyncedJsonRef.current) {
+        await pushLatestTasksForBackup();
+      }
+
+      const result = await createBackupSnapshot(source);
+      lastBackedUpVersionRef.current = result.stateVersion;
+      setBackupTooltip(formatBackupTooltip(result));
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 409 && isConflictStatePayload(error.payload)) {
+        setBackupTooltip('Резервная копия не создана: на сервере уже есть более новая версия. Сначала загрузите её.');
+      } else if (source === 'manual') {
+        setBackupTooltip('Не удалось создать резервную копию: сервер сейчас недоступен. Попробуйте ещё раз.');
+      }
+    } finally {
+      backupInFlightRef.current = false;
+      setIsBackuping(false);
+    }
+  }
+
+  backupRunnerRef.current = (source: BackupSource) => {
+    void runBackup(source);
+  };
+
+  useEffect(() => {
+    const intervalId = window.setInterval(() => {
+      backupRunnerRef.current('auto');
+    }, AUTO_BACKUP_INTERVAL_MS);
+
+    return () => window.clearInterval(intervalId);
+  }, []);
+
   useEffect(() => {
     if (!hasInitializedSyncRef.current) {
+      return;
+    }
+
+    if (conflictState) {
       return;
     }
 
@@ -172,20 +391,28 @@ function App() {
 
     const timeoutId = window.setTimeout(() => {
       void (async () => {
-        saveTasks(tasks);
-
         try {
-          const nextState = await pushTasksToServer(tasks);
+          const nextState = await pushTasksToServer(tasks, serverVersionRef.current ?? 0);
 
           if (isCancelled) {
             return;
           }
 
           lastSyncedJsonRef.current = nextJson;
+          setServerVersion(nextState.version);
+          setServerUpdatedAt(nextState.updatedAt);
+          setConflictState(null);
           setSyncStatus('synced');
           setSyncTooltip(formatSyncedTooltip(nextState.updatedAt));
         } catch (error) {
           if (isCancelled) {
+            return;
+          }
+
+          if (error instanceof ApiError && error.status === 409 && isConflictStatePayload(error.payload)) {
+            setConflictState(error.payload);
+            setSyncStatus('conflict');
+            setSyncTooltip('На сервере есть более новая версия. Загрузите её перед следующей записью.');
             return;
           }
 
@@ -199,7 +426,7 @@ function App() {
       isCancelled = true;
       window.clearTimeout(timeoutId);
     };
-  }, [tasks]);
+  }, [conflictState, tasks]);
 
   const openTasks = tasks.filter((task) => task.status === 'open');
   const archiveTasks = [...tasks]
@@ -213,6 +440,23 @@ function App() {
   function navigateToScreen(nextScreen: Screen) {
     window.history.pushState({}, '', getPathForScreen(nextScreen));
     setScreen(nextScreen);
+    setSelectedTaskId(null);
+  }
+
+  function reloadServerState() {
+    if (!conflictState) {
+      return;
+    }
+
+    const serverTasks = sanitizeTasks(conflictState.tasks);
+
+    setTasks(serverTasks);
+    setServerVersion(conflictState.version);
+    setServerUpdatedAt(conflictState.updatedAt);
+    lastSyncedJsonRef.current = serializeTasks(serverTasks);
+    setConflictState(null);
+    setSyncStatus('synced');
+    setSyncTooltip(formatSyncedTooltip(conflictState.updatedAt));
     setSelectedTaskId(null);
   }
 
@@ -321,12 +565,32 @@ function App() {
     <div className="app">
       <div className="app__inner">
         <Header
+          backupTooltip={backupTooltip}
           screen={screen}
+          currentUser={currentUser}
+          isBackuping={isBackuping}
           syncStatus={syncStatus}
           syncTooltip={syncTooltip}
+          onBackup={() => backupRunnerRef.current('manual')}
           onToggleScreen={() => navigateToScreen(screen === 'active' ? 'archive' : 'active')}
           onCreate={() => setCreateModalOpen(true)}
         />
+
+        {conflictState && (
+          <section className="sync-alert sync-alert--conflict" role="status">
+            <div className="sync-alert__copy">
+              <strong>Конфликт синхронизации</strong>
+              <span>
+                На другом устройстве сохранена более новая версия. Локальные изменения не будут отправляться,
+                пока вы не загрузите состояние с сервера.
+              </span>
+            </div>
+
+            <button type="button" className="button button--secondary" onClick={reloadServerState}>
+              Загрузить серверную версию
+            </button>
+          </section>
+        )}
 
         {screen === 'active' ? (
           <main className="screen">

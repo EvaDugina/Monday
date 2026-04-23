@@ -1,0 +1,113 @@
+{
+	email {$CADDY_EMAIL}
+	admin off
+
+	servers {
+		max_header_size 32KB
+		trusted_proxies static private_ranges
+	}
+
+	log {
+		output stdout
+		format json
+		level INFO
+	}
+}
+
+(monday-security) {
+	encode zstd gzip
+
+	header {
+		-Server
+		Content-Security-Policy "default-src 'self'; base-uri 'none'; frame-ancestors 'none'; object-src 'none'; form-action 'self' https://{$AUTH_DOMAIN}; img-src 'self' data:; font-src 'self'; style-src 'self'; script-src 'self'; connect-src 'self';"
+		Permissions-Policy "camera=(), geolocation=(), microphone=()"
+		Referrer-Policy "no-referrer"
+		Strict-Transport-Security "max-age=86400"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+	}
+
+	request_body {
+		max_size 1MB
+	}
+}
+
+{$MONDAY_DOMAIN} {
+	import monday-security
+	log {
+		output stdout
+		format json
+		level INFO
+	}
+
+	route {
+		reverse_proxy /outpost.goauthentik.io/* authentik-server:9000 {
+			transport http {
+				dial_timeout 5s
+				response_header_timeout 30s
+				read_timeout 30s
+				write_timeout 30s
+			}
+		}
+
+		forward_auth authentik-server:9000 {
+			uri /outpost.goauthentik.io/auth/caddy
+			copy_headers X-Authentik-Username X-Authentik-Groups X-Authentik-Entitlements X-Authentik-Email X-Authentik-Name X-Authentik-Uid X-Authentik-Jwt X-Authentik-Meta-Jwks X-Authentik-Meta-Outpost X-Authentik-Meta-Provider X-Authentik-Meta-App X-Authentik-Meta-Version
+			trusted_proxies private_ranges
+
+			transport http {
+				dial_timeout 5s
+				response_header_timeout 30s
+				read_timeout 30s
+				write_timeout 30s
+			}
+		}
+
+		@api path /api/*
+		handle @api {
+			reverse_proxy api:3001 {
+				transport http {
+					dial_timeout 5s
+					response_header_timeout 30s
+					read_timeout 30s
+					write_timeout 30s
+				}
+			}
+		}
+
+		handle {
+			reverse_proxy app:8080 {
+				transport http {
+					dial_timeout 5s
+					response_header_timeout 30s
+					read_timeout 30s
+					write_timeout 30s
+				}
+			}
+		}
+	}
+}
+
+{$AUTH_DOMAIN} {
+	encode zstd gzip
+	log {
+		output stdout
+		format json
+		level INFO
+	}
+
+	header {
+		-Server
+		Referrer-Policy "same-origin"
+		X-Content-Type-Options "nosniff"
+	}
+
+	reverse_proxy authentik-server:9000 {
+		transport http {
+			dial_timeout 5s
+			response_header_timeout 30s
+			read_timeout 30s
+			write_timeout 30s
+		}
+	}
+}
