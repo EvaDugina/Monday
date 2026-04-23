@@ -7,9 +7,11 @@ interface HeaderProps {
   screen: Screen;
   currentUser: CurrentUser | null;
   isBackuping: boolean;
+  isLoggingOut?: boolean;
   syncStatus: SyncStatus;
   syncTooltip: string;
   onBackup: () => void;
+  onLogout?: () => void;
   onToggleScreen: () => void;
   onCreate?: () => void;
 }
@@ -19,9 +21,11 @@ function Header({
   screen,
   currentUser,
   isBackuping,
+  isLoggingOut = false,
   syncStatus,
   syncTooltip,
   onBackup,
+  onLogout,
   onToggleScreen,
   onCreate,
 }: HeaderProps) {
@@ -34,14 +38,18 @@ function Header({
         : syncStatus === 'conflict'
           ? 'Конфликт'
           : 'Оффлайн';
-  const identityLabel = currentUser?.name || currentUser?.email || null;
+  const identityLabel = currentUser?.name || currentUser?.username || null;
   const combinedTooltip = `${syncTooltip}\n${backupTooltip}`;
 
   return (
     <header className="header">
       <div className="header__brand">
         <h1 className="header__title">MONDAY</h1>
-        <span className="sync-status has-tooltip" data-tooltip={combinedTooltip} aria-label={combinedTooltip}>
+        <span
+          className="sync-status has-tooltip has-tooltip--start"
+          data-tooltip={combinedTooltip}
+          aria-label={combinedTooltip}
+        >
           <button
             type="button"
             className={`sync-status__dot sync-status__dot--${syncStatus}`}
@@ -64,6 +72,11 @@ function Header({
         <button type="button" className="link-button" onClick={onToggleScreen}>
           {isArchive ? 'Активные' : 'Архив'}
         </button>
+        {currentUser?.canLogout && onLogout && (
+          <button type="button" className="link-button" onClick={onLogout} disabled={isLoggingOut}>
+            {isLoggingOut ? 'Выходим…' : 'Выйти'}
+          </button>
+        )}
       </nav>
     </header>
   );

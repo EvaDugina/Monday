@@ -1,19 +1,52 @@
 import express from 'express';
 import type { Request, Response } from 'express';
+import { extname, join, resolve } from 'node:path';
 import { closeDatabase, createBackupSnapshot, getTasksState, isDatabaseReady, setTasksState } from './db.js';
-import { attachRequestContext, createRateLimiter, requestLogger, requireAuth } from './http.js';
-import { ValidationError, parseTasksPayload } from './schema.js';
+import {
+  attachAuthContext,
+  clearLocalSession,
+  getCurrentUserPayload,
+  getLocalUserPayload,
+  issueLocalSession,
+  requireAuth,
+  resolveAuthConfig,
+  verifyLocalCredentials,
+} from './auth.js';
+import { attachRequestId, createRateLimiter, requestLogger } from './http.js';
+import { ValidationError, parseLoginPayload, parseTasksPayload } from './schema.js';
 
 const app = express();
 const port = Number(process.env.PORT ?? 3001);
 const debugMode = (process.env.DEBUG ?? (process.env.NODE_ENV === 'production' ? 'false' : 'true')) === 'true';
-const authRequired = (process.env.AUTH_REQUIRED ?? (debugMode ? 'false' : 'true')) === 'true';
+const proxyAuthRequired = (process.env.AUTH_REQUIRED ?? (debugMode ? 'false' : 'true')) === 'true';
+const authConfig = resolveAuthConfig({ authRequired: proxyAuthRequired });
+const appBasePath = (() => {
+  const rawBasePath =
+    process.env.APP_BASE_PATH?.trim() || (authConfig.mode === 'local' ? authConfig.basePath : '');
+
+  if (!rawBasePath || rawBasePath === '/') {
+    return '';
+  }
+
+  return rawBasePath.startsWith('/') ? rawBasePath.replace(/\/+$/, '') : `/${rawBasePath.replace(/\/+$/, '')}`;
+})();
+const mountPath = appBasePath || undefined;
+const staticRoot = process.env.STATIC_ROOT?.trim() ? resolve(process.cwd(), process.env.STATIC_ROOT) : null;
+const staticIndexPath = staticRoot ? join(staticRoot, 'index.html') : null;
+const router = express.Router();
 
 app.disable('x-powered-by');
-app.set('trust proxy', true);
+app.set('trust proxy', 'loopback, linklocal, uniquelocal');
 app.use(express.json({ limit: '1mb' }));
-app.use(attachRequestContext());
+app.use(attachRequestId());
+app.use(attachAuthContext(authConfig));
 app.use(requestLogger());
+
+const authLimiter = createRateLimiter({
+  name: 'auth',
+  windowMs: 60_000,
+  limit: 10,
+});
 
 const readLimiter = createRateLimiter({
   name: 'read',
@@ -33,18 +66,10 @@ const backupLimiter = createRateLimiter({
   limit: 12,
 });
 
-function getUserPayload(request: Request) {
-  return {
-    email: request.authContext.email ?? '',
-    name: request.authContext.name,
-    groups: request.authContext.groups,
-  };
-}
-
 function getBackupOwner(request: Request) {
   return {
-    key: request.authContext.email ?? request.authContext.username ?? 'anonymous',
-    email: request.authContext.email,
+    key: request.authContext.username ?? 'anonymous',
+    email: null,
     name: request.authContext.name ?? request.authContext.username,
   };
 }
@@ -71,11 +96,11 @@ function parseBackupSource(value: unknown): 'auto' | 'manual' {
   throw new ValidationError('source must be "auto" or "manual"');
 }
 
-app.get('/api/health/live', (_request, response) => {
+router.get('/api/health/live', (_request, response) => {
   response.json({ ok: true });
 });
 
-app.get('/api/health/ready', (_request, response) => {
+router.get('/api/health/ready', (_request, response) => {
   if (!isDatabaseReady()) {
     response.status(503).json({ ok: false });
     return;
@@ -84,7 +109,7 @@ app.get('/api/health/ready', (_request, response) => {
   response.json({ ok: true });
 });
 
-app.get('/api/health', (_request, response) => {
+router.get('/api/health', (_request, response) => {
   if (!isDatabaseReady()) {
     response.status(503).json({ ok: false });
     return;
@@ -93,21 +118,40 @@ app.get('/api/health', (_request, response) => {
   response.json({ ok: true });
 });
 
-if (authRequired) {
-  app.use('/api/me', requireAuth());
-  app.use('/api/tasks', requireAuth());
-  app.use('/api/backups', requireAuth());
+if (authConfig.mode === 'local') {
+  router.post('/api/auth/login', authLimiter, (request, response) => {
+    const payload = parseLoginPayload(request.body);
+
+    if (!verifyLocalCredentials(authConfig, payload.username, payload.password)) {
+      response.status(401).json({ error: 'Invalid credentials' });
+      return;
+    }
+
+    issueLocalSession(response, authConfig);
+    response.json(getLocalUserPayload(authConfig));
+  });
+
+  router.post('/api/auth/logout', requireAuth(), (_request, response) => {
+    clearLocalSession(response, authConfig);
+    response.status(204).end();
+  });
 }
 
-app.get('/api/me', readLimiter, (request, response) => {
-  response.json(getUserPayload(request));
+if (authConfig.mode !== 'none') {
+  router.use('/api/me', requireAuth());
+  router.use('/api/tasks', requireAuth());
+  router.use('/api/backups', requireAuth());
+}
+
+router.get('/api/me', readLimiter, (request, response) => {
+  response.json(getCurrentUserPayload(request, authConfig));
 });
 
-app.get('/api/tasks', readLimiter, (_request, response) => {
+router.get('/api/tasks', readLimiter, (_request, response) => {
   response.json(getTasksState());
 });
 
-app.put('/api/tasks', writeLimiter, (request, response) => {
+router.put('/api/tasks', writeLimiter, (request, response) => {
   const payload = parseTasksPayload(request.body);
   const result = setTasksState(payload.tasks, payload.expectedVersion);
 
@@ -122,10 +166,34 @@ app.put('/api/tasks', writeLimiter, (request, response) => {
   });
 });
 
-app.post('/api/backups', backupLimiter, (request, response) => {
+router.post('/api/backups', backupLimiter, (request, response) => {
   const source = parseBackupSource(request.body);
   response.json(createBackupSnapshot(getBackupOwner(request), source));
 });
+
+if (staticRoot && staticIndexPath) {
+  router.use(
+    express.static(staticRoot, {
+      index: false,
+      maxAge: '7d',
+    }),
+  );
+
+  router.get('*', (request, response, next) => {
+    if (request.path.startsWith('/api/') || extname(request.path)) {
+      next();
+      return;
+    }
+
+    response.sendFile(staticIndexPath);
+  });
+}
+
+if (mountPath) {
+  app.use(mountPath, router);
+} else {
+  app.use(router);
+}
 
 app.use((error: unknown, request: Request, response: Response, _next: express.NextFunction) => {
   if (response.headersSent) {
@@ -168,8 +236,10 @@ const server = app.listen(port, '0.0.0.0', () => {
       timestamp: new Date().toISOString(),
       level: 'info',
       event: 'server_started',
+      authMode: authConfig.mode,
+      mountedAt: appBasePath || '/',
       port,
-      authRequired,
+      staticRootConfigured: Boolean(staticRoot),
     }),
   );
 });

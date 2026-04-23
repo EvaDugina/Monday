@@ -8,6 +8,7 @@ interface CategorySectionProps {
   tasks: Task[];
   draggedTaskId: string | null;
   draggedTaskCategory: Category | null;
+  closingTaskIds: string[];
   isDropTarget: boolean;
   onDropTargetChange: (category: Category | null) => void;
   onCreate: (title: string) => void;
@@ -24,6 +25,7 @@ function CategorySection({
   tasks,
   draggedTaskId,
   draggedTaskCategory,
+  closingTaskIds,
   isDropTarget,
   onDropTargetChange,
   onCreate,
@@ -128,6 +130,7 @@ function CategorySection({
               key={task.id}
               task={task}
               isDragging={task.id === draggedTaskId}
+              isClosing={closingTaskIds.includes(task.id)}
               onDragStart={() => onTaskDragStart(task.id)}
               onDragEnd={onTaskDragEnd}
               onOpen={() => onTaskOpen(task.id)}

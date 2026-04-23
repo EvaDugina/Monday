@@ -1,0 +1,49 @@
+services:
+  monday:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.timeweb
+      args:
+        VITE_BASE_PATH: ${APP_BASE_PATH:-/monday/}
+    ports:
+      - "127.0.0.1:${MONDAY_APP_PORT:-18080}:8080"
+    environment:
+      APP_BASE_PATH: ${APP_BASE_PATH:-/monday}
+      AUTH_REQUIRED: "true"
+      DEBUG: "false"
+      MONDAY_AUTH_NAME: ${MONDAY_AUTH_NAME:-}
+      MONDAY_AUTH_PASSWORD_HASH: ${MONDAY_AUTH_PASSWORD_HASH:?password hash required}
+      MONDAY_AUTH_PASSWORD_SALT: ${MONDAY_AUTH_PASSWORD_SALT:?password salt required}
+      MONDAY_AUTH_USERNAME: ${MONDAY_AUTH_USERNAME:?username required}
+      MONDAY_SESSION_SECRET: ${MONDAY_SESSION_SECRET:?session secret required}
+      PORT: 8080
+      SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-false}
+      SQLITE_PATH: /data/monday.sqlite
+      STATIC_ROOT: /app/public
+    volumes:
+      - monday_timeweb_sqlite_data:/data
+      - ../backups:/backups
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "const basePath=(process.env.APP_BASE_PATH||'/monday').replace(/\\/+$/,'')||'';fetch('http://127.0.0.1:8080'+basePath+'/api/health/ready').then((response)=>process.exit(response.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+volumes:
+  monday_timeweb_sqlite_data:
+    name: monday_timeweb_sqlite_data

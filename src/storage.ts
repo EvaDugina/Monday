@@ -2,9 +2,11 @@ import type { Task } from './types';
 
 const TASKS_STORAGE_KEY = 'monday:tasks';
 const SYNC_STATE_STORAGE_KEY = 'monday:sync-state';
+const LAST_SYNCED_TASKS_STORAGE_KEY = 'monday:last-synced-tasks';
 const ARCHIVE_RETENTION_DAYS = 90;
 
 export interface LocalStateSnapshot {
+  lastSyncedJson: string | null;
   tasks: Task[];
   version: number | null;
   updatedAt: string | null;
@@ -55,12 +57,30 @@ function loadSyncMetadata(): Pick<LocalStateSnapshot, 'updatedAt' | 'version'> {
   }
 }
 
+function loadLastSyncedJson(): string | null {
+  const raw = window.localStorage.getItem(LAST_SYNCED_TASKS_STORAGE_KEY);
+
+  if (!raw) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(raw);
+    const sanitized = sanitizeTasks(Array.isArray(parsed) ? (parsed as Task[]) : []);
+    return serializeTasks(sanitized);
+  } catch {
+    return null;
+  }
+}
+
 export function loadLocalState(): LocalStateSnapshot {
   const raw = window.localStorage.getItem(TASKS_STORAGE_KEY);
   const syncMetadata = loadSyncMetadata();
+  const lastSyncedJson = loadLastSyncedJson();
 
   if (!raw) {
     return {
+      lastSyncedJson,
       tasks: [],
       version: syncMetadata.version,
       updatedAt: syncMetadata.updatedAt,
@@ -80,6 +100,7 @@ export function loadLocalState(): LocalStateSnapshot {
       // quarantine failed too (quota) — original data stays in main slot, untouched
     }
     return {
+      lastSyncedJson,
       tasks: [],
       version: syncMetadata.version,
       updatedAt: syncMetadata.updatedAt,
@@ -91,6 +112,7 @@ export function loadLocalState(): LocalStateSnapshot {
 
   if (changed) {
     saveLocalState({
+      lastSyncedJson,
       tasks: sanitized,
       version: syncMetadata.version,
       updatedAt: syncMetadata.updatedAt,
@@ -98,6 +120,7 @@ export function loadLocalState(): LocalStateSnapshot {
   }
 
   return {
+    lastSyncedJson,
     tasks: sanitized,
     version: syncMetadata.version,
     updatedAt: syncMetadata.updatedAt,
@@ -114,6 +137,12 @@ export function saveLocalState(snapshot: LocalStateSnapshot): void {
         updatedAt: snapshot.updatedAt,
       }),
     );
+
+    if (snapshot.lastSyncedJson === null) {
+      window.localStorage.removeItem(LAST_SYNCED_TASKS_STORAGE_KEY);
+    } else {
+      window.localStorage.setItem(LAST_SYNCED_TASKS_STORAGE_KEY, snapshot.lastSyncedJson);
+    }
   } catch (error) {
     console.error('[MONDAY] Failed to persist state to localStorage:', error);
   }

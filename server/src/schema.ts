@@ -48,6 +48,11 @@ export interface PutTasksPayload {
   expectedVersion: number;
 }
 
+export interface LoginPayload {
+  password: string;
+  username: string;
+}
+
 export class ValidationError extends Error {
   readonly statusCode = 400;
 
@@ -217,5 +222,14 @@ export function parseTasksPayload(value: unknown): PutTasksPayload {
   return {
     tasks: tasks.map((task, index) => parseTask(task, index)),
     expectedVersion: expectInteger(record.expectedVersion, 'expectedVersion', 0),
+  };
+}
+
+export function parseLoginPayload(value: unknown): LoginPayload {
+  const record = expectRecord(value, 'Body must be a JSON object');
+
+  return {
+    password: expectTrimmedString(record.password, 'password', 200),
+    username: expectTrimmedString(record.username, 'username', MAX_ID_LENGTH),
   };
 }

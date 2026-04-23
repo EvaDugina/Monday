@@ -44,7 +44,7 @@ export interface BackupSnapshotResponse {
 }
 
 export interface CurrentUser {
-  email: string;
+  canLogout: boolean;
+  username: string;
   name: string | null;
-  groups: string[];
 }

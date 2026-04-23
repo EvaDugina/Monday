@@ -82,11 +82,14 @@ required_vars=(
   MONDAY_OWNER_NAME
   MONDAY_OWNER_EMAIL
   MONDAY_OWNER_PASSWORD
+  MONDAY_AUTH_BRAND_TITLE
+)
+
+optional_denied_vars=(
   MONDAY_DENIED_USERNAME
   MONDAY_DENIED_NAME
   MONDAY_DENIED_EMAIL
   MONDAY_DENIED_PASSWORD
-  MONDAY_AUTH_BRAND_TITLE
 )
 
 for var_name in "${required_vars[@]}"; do
@@ -95,6 +98,18 @@ for var_name in "${required_vars[@]}"; do
     exit 1
   fi
 done
+
+provided_denied_count=0
+for var_name in "${optional_denied_vars[@]}"; do
+  if [[ -n "${!var_name:-}" ]]; then
+    ((provided_denied_count+=1))
+  fi
+done
+
+if (( provided_denied_count != 0 && provided_denied_count != ${#optional_denied_vars[@]} )); then
+  echo "Set all MONDAY_DENIED_* variables together or leave them all empty." >&2
+  exit 1
+fi
 
 docker_compose --env-file "$ENV_FILE_DOCKER" -f "$COMPOSE_FILE_DOCKER" up -d \
   authentik-postgresql authentik-server authentik-worker app api caddy
@@ -132,16 +147,21 @@ def required_env(name: str) -> str:
     return value
 
 
+def optional_env(name: str) -> str | None:
+    value = os.environ.get(name, "").strip()
+    return value or None
+
+
 MONDAY_DOMAIN = required_env("MONDAY_DOMAIN")
 AUTH_DOMAIN = required_env("AUTH_DOMAIN")
 OWNER_USERNAME = required_env("MONDAY_OWNER_USERNAME")
 OWNER_NAME = required_env("MONDAY_OWNER_NAME")
 OWNER_EMAIL = required_env("MONDAY_OWNER_EMAIL")
 OWNER_PASSWORD = required_env("MONDAY_OWNER_PASSWORD")
-DENIED_USERNAME = required_env("MONDAY_DENIED_USERNAME")
-DENIED_NAME = required_env("MONDAY_DENIED_NAME")
-DENIED_EMAIL = required_env("MONDAY_DENIED_EMAIL")
-DENIED_PASSWORD = required_env("MONDAY_DENIED_PASSWORD")
+DENIED_USERNAME = optional_env("MONDAY_DENIED_USERNAME")
+DENIED_NAME = optional_env("MONDAY_DENIED_NAME")
+DENIED_EMAIL = optional_env("MONDAY_DENIED_EMAIL")
+DENIED_PASSWORD = optional_env("MONDAY_DENIED_PASSWORD")
 BRAND_TITLE = required_env("MONDAY_AUTH_BRAND_TITLE")
 
 
@@ -186,10 +206,12 @@ provider_invalidation_flow = require_flow("default-provider-invalidation-flow")
 
 owner_group, _ = Group.objects.get_or_create(name="monday-owner")
 owner_user = upsert_user(OWNER_USERNAME, OWNER_NAME, OWNER_EMAIL, OWNER_PASSWORD)
-denied_user = upsert_user(DENIED_USERNAME, DENIED_NAME, DENIED_EMAIL, DENIED_PASSWORD)
-
 owner_user.groups.add(owner_group)
-denied_user.groups.remove(owner_group)
+
+denied_user = None
+if all(value is not None for value in (DENIED_USERNAME, DENIED_NAME, DENIED_EMAIL, DENIED_PASSWORD)):
+    denied_user = upsert_user(DENIED_USERNAME, DENIED_NAME, DENIED_EMAIL, DENIED_PASSWORD)
+    denied_user.groups.remove(owner_group)
 
 provider, _ = ProxyProvider.objects.get_or_create(
     name="MONDAY Proxy Provider",
@@ -253,7 +275,7 @@ embedded_outpost.build_user_permissions(embedded_outpost.user)
 print(
     {
         "owner_username": owner_user.username,
-        "denied_username": denied_user.username,
+        "denied_username": denied_user.username if denied_user else None,
         "application_slug": application.slug,
         "provider_client_id": provider.client_id,
         "monday_domain": MONDAY_DOMAIN,

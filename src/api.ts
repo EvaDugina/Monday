@@ -6,6 +6,7 @@ import type {
   ServerTasksState,
   Task,
 } from './types';
+import { buildApiPath } from './basePath';
 
 export class ApiError extends Error {
   readonly status: number;
@@ -39,9 +40,9 @@ function isSaveTasksResponse(value: unknown): value is SaveTasksResponse {
 function isCurrentUser(value: unknown): value is CurrentUser {
   return (
     isRecord(value) &&
-    typeof value.email === 'string' &&
-    (typeof value.name === 'string' || value.name === null) &&
-    Array.isArray(value.groups)
+    typeof value.canLogout === 'boolean' &&
+    typeof value.username === 'string' &&
+    (typeof value.name === 'string' || value.name === null)
   );
 }
 
@@ -59,7 +60,10 @@ function isBackupSnapshotResponse(value: unknown): value is BackupSnapshotRespon
 }
 
 async function readJsonResponse<T>(input: RequestInfo | URL, init?: RequestInit): Promise<T> {
-  const response = await fetch(input, init);
+  const response = await fetch(input, {
+    credentials: 'same-origin',
+    ...init,
+  });
   const payload = await response.json().catch(() => null);
 
   if (!response.ok) {
@@ -74,7 +78,7 @@ export function isConflictStatePayload(value: unknown): value is ServerTasksStat
 }
 
 export async function pullTasksFromServer(): Promise<ServerTasksState> {
-  const payload = await readJsonResponse<ServerTasksState>('/api/tasks', {
+  const payload = await readJsonResponse<ServerTasksState>(buildApiPath('tasks'), {
     cache: 'no-store',
   });
 
@@ -86,7 +90,7 @@ export async function pullTasksFromServer(): Promise<ServerTasksState> {
 }
 
 export async function pushTasksToServer(tasks: Task[], expectedVersion: number): Promise<SaveTasksResponse> {
-  const payload = await readJsonResponse<SaveTasksResponse>('/api/tasks', {
+  const payload = await readJsonResponse<SaveTasksResponse>(buildApiPath('tasks'), {
     method: 'PUT',
     headers: {
       'Content-Type': 'application/json',
@@ -102,7 +106,7 @@ export async function pushTasksToServer(tasks: Task[], expectedVersion: number):
 }
 
 export async function fetchCurrentUser(): Promise<CurrentUser> {
-  const payload = await readJsonResponse<CurrentUser>('/api/me', {
+  const payload = await readJsonResponse<CurrentUser>(buildApiPath('me'), {
     cache: 'no-store',
   });
 
@@ -114,7 +118,7 @@ export async function fetchCurrentUser(): Promise<CurrentUser> {
 }
 
 export async function createBackupSnapshot(source: BackupSource): Promise<BackupSnapshotResponse> {
-  const payload = await readJsonResponse<BackupSnapshotResponse>('/api/backups', {
+  const payload = await readJsonResponse<BackupSnapshotResponse>(buildApiPath('backups'), {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -127,4 +131,32 @@ export async function createBackupSnapshot(source: BackupSource): Promise<Backup
   }
 
   return payload;
+}
+
+export async function loginToServer(username: string, password: string): Promise<CurrentUser> {
+  const payload = await readJsonResponse<CurrentUser>(buildApiPath('auth/login'), {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ username, password }),
+  });
+
+  if (!isCurrentUser(payload)) {
+    throw new Error('Invalid POST /api/auth/login response payload');
+  }
+
+  return payload;
+}
+
+export async function logoutFromServer(): Promise<void> {
+  const response = await fetch(buildApiPath('auth/logout'), {
+    credentials: 'same-origin',
+    method: 'POST',
+  });
+
+  if (!response.ok) {
+    const payload = await response.json().catch(() => null);
+    throw new ApiError(`Request failed with status ${response.status}`, response.status, payload);
+  }
 }

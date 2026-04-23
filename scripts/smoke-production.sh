@@ -96,7 +96,7 @@ wait_for_command 180 container_health_is_healthy authentik-worker
 
 echo "Checking external unauthenticated redirect..."
 headers_file="$(mktemp)"
-curl -ksS -D "$headers_file" -o /dev/null "https://${MONDAY_DOMAIN}/"
+curl -fsS -D "$headers_file" -o /dev/null "https://${MONDAY_DOMAIN}/"
 grep -qi '^http/.* 302' "$headers_file"
 grep -qi "^location: https://${AUTH_DOMAIN}/application/o/authorize/" "$headers_file"
 grep -qi '^strict-transport-security:' "$headers_file"
@@ -106,7 +106,7 @@ grep -qi '^x-content-type-options:' "$headers_file"
 rm -f "$headers_file"
 
 echo "Checking that Authentik login UI is reachable..."
-curl -ksS -o /dev/null -w '%{http_code}' "https://${AUTH_DOMAIN}/" | grep -qE '^(200|302)$'
+curl -fsS -o /dev/null -w '%{http_code}' "https://${AUTH_DOMAIN}/" | grep -qE '^(200|302)$'
 
 echo "Checking that API is not published directly on the host..."
 if curl -fsS --max-time 2 http://127.0.0.1:3001/api/health/live >/dev/null 2>&1; then

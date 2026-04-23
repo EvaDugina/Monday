@@ -1,47 +1,65 @@
 # MONDAY
 
-MONDAY is a small task board with a React/Vite frontend and an Express/SQLite API. The repo keeps the application code in `src/` and `server/src/`, while deployment assets live in `deploy/` and operator scripts live in `scripts/`.
+Канонические документы проекта:
 
-## Run locally
+- [`.docs/product.md`](./.docs/product.md) - продуктовый источник истины
+- [`.docs/technical.md`](./.docs/technical.md) - технический источник истины
+
+## Quick Start
+
+Локальный запуск:
 
 ```bash
 npm run dev
 ```
 
-The local stack starts the static app and API with `DEBUG=true` defaults. The UI is available on `http://localhost:8080`, the API on `http://localhost:3001`.
+- UI: `http://localhost:8080`
+- API: `http://localhost:3001`
 
-## Deploy to production
+## Production
 
-1. Copy `.env.example` to `.env`.
-2. Set `DEBUG=false` and fill the required hostnames and secrets.
-3. Run:
+### Timeweb VPS / nginx / `/monday`
+
+1. Скопируйте `deploy/timeweb.env.example` в `deploy/timeweb.env`.
+2. Сгенерируйте хэш пароля:
+
+```bash
+node scripts/generate-auth-hash.mjs "your-password"
+```
+
+3. Вставьте `MONDAY_AUTH_PASSWORD_SALT`, `MONDAY_AUTH_PASSWORD_HASH` и `MONDAY_SESSION_SECRET` в `deploy/timeweb.env`.
+4. Поднимите контейнер:
+
+```bash
+npm run deploy:timeweb
+```
+
+5. Добавьте [deploy/nginx.timeweb.conf](./deploy/nginx.timeweb.conf) в хостовый `nginx` и проксируйте `/monday` на `127.0.0.1:18080`.
+6. После настройки `nginx` проверьте:
+
+```bash
+./scripts/smoke-timeweb.sh
+```
+
+Первый запуск допускается по `http://IP/monday`, но для постоянного публичного доступа следующий обязательный шаг — включить `HTTPS` по IP и перевести `SESSION_COOKIE_SECURE=true`.
+
+### Legacy domain stack
+
+1. Скопируйте `.env.example` в `.env`.
+2. Заполните домены и секреты.
+3. Запустите:
 
 ```bash
 npm run deploy:prod
 ```
 
-If you use Authentik for the first time on that host, run `./scripts/bootstrap-authentik.sh` after the stack is healthy.
-
-## Configuration
-
-All environment settings are documented in `.env.example`. The main switch is `DEBUG`:
-
-- `DEBUG=true`: local/dev mode, auth is relaxed and the lightweight dev stack is enough.
-- `DEBUG=false`: production mode, hardened deployment with Caddy + Authentik.
-
-You should not need separate env files for dev and prod.
-
-## Repo layout
-
-- `src/`: frontend application.
-- `server/src/`: API, validation, persistence, CLI helpers.
-- `deploy/`: compose files, Dockerfiles, Caddy configs.
-- `scripts/`: bootstrap, smoke, backup, restore.
+Если Authentik поднимается на хосте впервые, после старта стека выполните `./scripts/bootstrap-authentik.sh`.
 
 ## Operations
 
-- Production smoke check: `./scripts/smoke-production.sh`
-- SQLite backup: `./scripts/backup-monday-sqlite.sh`
-- SQLite restore: `./scripts/restore-monday-sqlite.sh backups/sqlite/<file>.sqlite.gz`
-- Authentik PostgreSQL backup: `./scripts/backup-authentik-postgres.sh`
-- Authentik PostgreSQL restore: `./scripts/restore-authentik-postgres.sh backups/postgres/<file>.sql.gz`
+- smoke timeweb: `./scripts/smoke-timeweb.sh`
+- smoke: `./scripts/smoke-production.sh`
+- backup SQLite: `./scripts/backup-monday-sqlite.sh`
+- restore SQLite: `./scripts/restore-monday-sqlite.sh backups/sqlite/<file>.sqlite.gz`
+- backup Authentik PostgreSQL: `./scripts/backup-authentik-postgres.sh`
+- restore Authentik PostgreSQL: `./scripts/restore-authentik-postgres.sh backups/postgres/<file>.sql.gz`

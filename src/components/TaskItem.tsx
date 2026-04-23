@@ -5,16 +5,30 @@ import { getUrgency } from '../utils/urgency';
 interface TaskItemProps {
   task: Task;
   isDragging?: boolean;
+  isClosing?: boolean;
   onDragStart?: () => void;
   onDragEnd?: () => void;
   onOpen: () => void;
   onQuickClose?: () => void;
 }
 
-function TaskItem({ task, isDragging = false, onDragStart, onDragEnd, onOpen, onQuickClose }: TaskItemProps) {
+function TaskItem({
+  task,
+  isDragging = false,
+  isClosing = false,
+  onDragStart,
+  onDragEnd,
+  onOpen,
+  onQuickClose,
+}: TaskItemProps) {
   const urgency = getUrgency(task.deadline);
 
   function handleDragStart(event: React.DragEvent<HTMLDivElement>) {
+    if (isClosing) {
+      event.preventDefault();
+      return;
+    }
+
     event.dataTransfer.effectAllowed = 'move';
     event.dataTransfer.setData('application/x-monday-task-id', task.id);
     event.dataTransfer.setData('application/x-monday-task-category', task.category);
@@ -23,17 +37,21 @@ function TaskItem({ task, isDragging = false, onDragStart, onDragEnd, onOpen, on
   }
 
   return (
-    <article className={`task-card${isDragging ? ' task-card--dragging' : ''}`} data-category={task.category}>
+    <article
+      className={`task-card${isDragging ? ' task-card--dragging' : ''}${isClosing ? ' task-card--closing' : ''}`}
+      data-category={task.category}
+    >
       {onQuickClose && (
         <button
           type="button"
           className="task-card__checkbox"
           onClick={onQuickClose}
           aria-label="Закрыть задачу"
+          disabled={isClosing}
         />
       )}
 
-      <button type="button" className="task-card__main" onClick={onOpen}>
+      <button type="button" className="task-card__main" onClick={onOpen} disabled={isClosing}>
         <div className="task-card__headline">
           {task.urgent && <span className="task-card__urgent-badge">СРОЧНО</span>}
           <span className="task-card__title">{task.title}</span>
@@ -60,11 +78,11 @@ function TaskItem({ task, isDragging = false, onDragStart, onDragEnd, onOpen, on
       </button>
 
       <div
-        className="task-card__drag-handle has-tooltip"
+        className="task-card__drag-handle has-tooltip has-tooltip--end"
         data-tooltip="Перетащить задачу в другой раздел"
-        draggable
+        draggable={!isClosing}
         role="button"
-        tabIndex={0}
+        tabIndex={isClosing ? -1 : 0}
         aria-label="Перетащить задачу в другой раздел"
         aria-grabbed={isDragging}
         onDragStart={handleDragStart}

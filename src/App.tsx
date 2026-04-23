@@ -4,13 +4,17 @@ import {
   createBackupSnapshot,
   fetchCurrentUser,
   isConflictStatePayload,
+  loginToServer,
+  logoutFromServer,
   pullTasksFromServer,
   pushTasksToServer,
 } from './api';
+import { stripAppBasePath, withAppBasePath } from './basePath';
 import ArchiveList from './components/ArchiveList';
 import CategorySection from './components/CategorySection';
 import CreateTaskModal from './components/CreateTaskModal';
 import Header from './components/Header';
+import LoginScreen from './components/LoginScreen';
 import TaskDetailsModal from './components/TaskDetailsModal';
 import { loadLocalState, sanitizeTasks, saveLocalState, serializeTasks } from './storage';
 import type {
@@ -32,15 +36,21 @@ const CATEGORIES: Array<{ key: Category; label: string }> = [
   { key: 'projects', label: 'Projects' },
 ];
 const AUTO_BACKUP_INTERVAL_MS = 5 * 60_000;
+const TASK_CLOSE_ANIMATION_MS = 760;
+const DRAG_SCROLL_EDGE_THRESHOLD_PX = 140;
+const DRAG_SCROLL_MAX_STEP_PX = 22;
 const DEFAULT_BACKUP_TOOLTIP =
   'Резервные копии создаются автоматически раз в 5 минут. Нажмите на точку, чтобы создать снимок сейчас.';
+const LOGIN_REQUIRED_TOOLTIP = 'Войдите, чтобы открыть MONDAY и синхронизировать задачи.';
+const SESSION_EXPIRED_MESSAGE = 'Сессия завершилась. Войдите снова.';
 
 function getScreenFromPath(pathname: string): Screen {
-  return pathname.startsWith('/archive') ? 'archive' : 'active';
+  const relativePath = stripAppBasePath(pathname);
+  return relativePath === '/archive' || relativePath.startsWith('/archive/') ? 'archive' : 'active';
 }
 
 function getPathForScreen(screen: Screen): string {
-  return screen === 'archive' ? '/archive' : '/';
+  return screen === 'archive' ? withAppBasePath('/archive') : withAppBasePath('/');
 }
 
 function normalizeDeadline(deadline: Deadline): Deadline {
@@ -75,6 +85,7 @@ function normalizeDeadline(deadline: Deadline): Deadline {
 }
 
 type SyncStatus = 'synced' | 'syncing' | 'offline' | 'conflict';
+type AuthStatus = 'loading' | 'unauthenticated' | 'authenticated';
 
 function formatDateTime(timestamp: string): string {
   return new Intl.DateTimeFormat('ru-RU', {
@@ -95,6 +106,25 @@ function formatBackupTooltip(result: BackupSnapshotResponse): string {
   return `${actionLabel}: ${backupTime}. Снимок состояния: ${snapshotTime}. Храним последние ${result.retainedBackups} бэкапа на пользователя.`;
 }
 
+function shouldPreserveLocalSnapshot(params: {
+  lastSyncedJson: string | null;
+  localJson: string;
+  localTasksCount: number;
+  serverJson: string;
+}): boolean {
+  const { lastSyncedJson, localJson, localTasksCount, serverJson } = params;
+
+  if (localTasksCount === 0 || localJson === serverJson) {
+    return false;
+  }
+
+  if (lastSyncedJson === null) {
+    return true;
+  }
+
+  return localJson !== lastSyncedJson;
+}
+
 function App() {
   const initialStateRef = useRef<ReturnType<typeof loadLocalState> | null>(null);
 
@@ -104,6 +134,8 @@ function App() {
 
   const initialState = initialStateRef.current;
 
+  const [authError, setAuthError] = useState<string | null>(null);
+  const [authStatus, setAuthStatus] = useState<AuthStatus>('loading');
   const [tasks, setTasks] = useState<Task[]>(() => initialState.tasks);
   const [serverVersion, setServerVersion] = useState<number | null>(() => initialState.version);
   const [serverUpdatedAt, setServerUpdatedAt] = useState<string | null>(() => initialState.updatedAt);
@@ -112,21 +144,61 @@ function App() {
   const [isCreateModalOpen, setCreateModalOpen] = useState(false);
   const [draggedTaskId, setDraggedTaskId] = useState<string | null>(null);
   const [dropTargetCategory, setDropTargetCategory] = useState<Category | null>(null);
+  const [closingTaskIds, setClosingTaskIds] = useState<string[]>([]);
   const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
   const [conflictState, setConflictState] = useState<ServerTasksState | null>(null);
-  const [syncStatus, setSyncStatus] = useState<SyncStatus>('syncing');
-  const [syncTooltip, setSyncTooltip] = useState('Подключаемся к серверу…');
+  const [syncStatus, setSyncStatus] = useState<SyncStatus>('offline');
+  const [syncTooltip, setSyncTooltip] = useState(LOGIN_REQUIRED_TOOLTIP);
   const [backupTooltip, setBackupTooltip] = useState(DEFAULT_BACKUP_TOOLTIP);
   const [isBackuping, setIsBackuping] = useState(false);
+  const [isAuthSubmitting, setIsAuthSubmitting] = useState(false);
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
   const latestTasksRef = useRef(tasks);
   const serverVersionRef = useRef(serverVersion);
   const syncStatusRef = useRef<SyncStatus>(syncStatus);
   const conflictStateRef = useRef<ServerTasksState | null>(conflictState);
-  const lastSyncedJsonRef = useRef(serializeTasks(tasks));
+  const lastSyncedJsonRef = useRef<string | null>(initialState.lastSyncedJson);
   const lastBackedUpVersionRef = useRef<number | null>(null);
   const hasInitializedSyncRef = useRef(false);
   const backupInFlightRef = useRef(false);
+  const closingTimeoutsRef = useRef<Record<string, number>>({});
+  const dragPointerYRef = useRef<number | null>(null);
+  const dragScrollFrameRef = useRef<number | null>(null);
   const backupRunnerRef = useRef<(source: BackupSource) => void>(() => undefined);
+
+  function clearClosingAnimations(): void {
+    Object.values(closingTimeoutsRef.current).forEach((timeoutId) => window.clearTimeout(timeoutId));
+    closingTimeoutsRef.current = {};
+    setClosingTaskIds([]);
+  }
+
+  function moveToUnauthenticatedState(message: string, errorMessage: string | null): void {
+    clearClosingAnimations();
+    backupInFlightRef.current = false;
+    hasInitializedSyncRef.current = false;
+    lastBackedUpVersionRef.current = null;
+    setCurrentUser(null);
+    setAuthStatus('unauthenticated');
+    setAuthError(errorMessage);
+    setConflictState(null);
+    setSelectedTaskId(null);
+    setCreateModalOpen(false);
+    setDraggedTaskId(null);
+    setDropTargetCategory(null);
+    setIsBackuping(false);
+    setSyncStatus('offline');
+    setSyncTooltip(message);
+    setBackupTooltip(DEFAULT_BACKUP_TOOLTIP);
+  }
+
+  function handleUnauthorizedError(error: unknown, message = SESSION_EXPIRED_MESSAGE): boolean {
+    if (error instanceof ApiError && error.status === 401) {
+      moveToUnauthenticatedState(message, message);
+      return true;
+    }
+
+    return false;
+  }
 
   useEffect(() => {
     latestTasksRef.current = tasks;
@@ -146,6 +218,7 @@ function App() {
 
   useEffect(() => {
     saveLocalState({
+      lastSyncedJson: lastSyncedJsonRef.current,
       tasks,
       version: serverVersion,
       updatedAt: serverUpdatedAt,
@@ -167,6 +240,17 @@ function App() {
     }
   }, [selectedTaskId, tasks]);
 
+  useEffect(
+    () => () => {
+      clearClosingAnimations();
+
+      if (dragScrollFrameRef.current !== null) {
+        window.cancelAnimationFrame(dragScrollFrameRef.current);
+      }
+    },
+    [],
+  );
+
   useEffect(() => {
     let isCancelled = false;
 
@@ -174,13 +258,27 @@ function App() {
       try {
         const user = await fetchCurrentUser();
 
-        if (!isCancelled && user.email) {
-          setCurrentUser(user);
+        if (isCancelled) {
+          return;
         }
-      } catch {
-        if (!isCancelled) {
-          setCurrentUser(null);
+
+        setCurrentUser(user);
+        setAuthStatus('authenticated');
+        setAuthError(null);
+      } catch (error) {
+        if (isCancelled) {
+          return;
         }
+
+        if (error instanceof ApiError && error.status === 401) {
+          moveToUnauthenticatedState(LOGIN_REQUIRED_TOOLTIP, null);
+          return;
+        }
+
+        moveToUnauthenticatedState(
+          'Сервер недоступен. Проверьте сервис и попробуйте ещё раз.',
+          'Сервер недоступен. Проверьте сервис и попробуйте ещё раз.',
+        );
       }
     })();
 
@@ -190,7 +288,15 @@ function App() {
   }, []);
 
   useEffect(() => {
+    if (authStatus !== 'authenticated') {
+      return;
+    }
+
+    let didLoseAuth = false;
     let isCancelled = false;
+    hasInitializedSyncRef.current = false;
+    setSyncStatus('syncing');
+    setSyncTooltip('Подключаемся к серверу…');
 
     async function bootstrapSync() {
       try {
@@ -221,6 +327,23 @@ function App() {
           return;
         }
 
+        if (
+          shouldPreserveLocalSnapshot({
+            lastSyncedJson: initialState.lastSyncedJson,
+            localJson,
+            localTasksCount: localTasks.length,
+            serverJson,
+          })
+        ) {
+          lastSyncedJsonRef.current = serverJson;
+          setServerVersion(serverState.version);
+          setServerUpdatedAt(serverState.updatedAt);
+          setConflictState(serverState);
+          setSyncStatus('conflict');
+          setSyncTooltip('Локальная версия отличается от серверной. Разрешите конфликт перед следующей записью.');
+          return;
+        }
+
         setTasks(serverTasks);
         lastSyncedJsonRef.current = serverJson;
         setServerVersion(serverState.version);
@@ -233,11 +356,15 @@ function App() {
           return;
         }
 
-        lastSyncedJsonRef.current = serializeTasks(latestTasksRef.current);
+        if (handleUnauthorizedError(error)) {
+          didLoseAuth = true;
+          return;
+        }
+
         setSyncStatus('offline');
         setSyncTooltip('Сервер недоступен, работаем из localStorage.');
       } finally {
-        if (!isCancelled) {
+        if (!isCancelled && !didLoseAuth) {
           hasInitializedSyncRef.current = true;
         }
       }
@@ -248,7 +375,7 @@ function App() {
     return () => {
       isCancelled = true;
     };
-  }, []);
+  }, [authStatus, initialState.lastSyncedJson]);
 
   async function waitForPendingSync(timeoutMs = 8_000): Promise<boolean> {
     const startedAt = Date.now();
@@ -268,7 +395,7 @@ function App() {
     const nextTasks = latestTasksRef.current;
     const nextJson = serializeTasks(nextTasks);
 
-    if (nextJson === lastSyncedJsonRef.current) {
+    if (lastSyncedJsonRef.current !== null && nextJson === lastSyncedJsonRef.current) {
       return;
     }
 
@@ -285,6 +412,10 @@ function App() {
       setSyncStatus('synced');
       setSyncTooltip(formatSyncedTooltip(nextState.updatedAt));
     } catch (error) {
+      if (handleUnauthorizedError(error)) {
+        return;
+      }
+
       if (error instanceof ApiError && error.status === 409 && isConflictStatePayload(error.payload)) {
         setConflictState(error.payload);
         setSyncStatus('conflict');
@@ -299,6 +430,11 @@ function App() {
   }
 
   async function runBackup(source: BackupSource): Promise<void> {
+    if (authStatus !== 'authenticated') {
+      setBackupTooltip(LOGIN_REQUIRED_TOOLTIP);
+      return;
+    }
+
     if (backupInFlightRef.current) {
       if (source === 'manual') {
         setBackupTooltip('Резервное копирование уже выполняется. Подождите завершения текущего снимка.');
@@ -347,6 +483,10 @@ function App() {
       lastBackedUpVersionRef.current = result.stateVersion;
       setBackupTooltip(formatBackupTooltip(result));
     } catch (error) {
+      if (handleUnauthorizedError(error)) {
+        return;
+      }
+
       if (error instanceof ApiError && error.status === 409 && isConflictStatePayload(error.payload)) {
         setBackupTooltip('Резервная копия не создана: на сервере уже есть более новая версия. Сначала загрузите её.');
       } else if (source === 'manual') {
@@ -371,17 +511,13 @@ function App() {
   }, []);
 
   useEffect(() => {
-    if (!hasInitializedSyncRef.current) {
-      return;
-    }
-
-    if (conflictState) {
+    if (authStatus !== 'authenticated' || !hasInitializedSyncRef.current || conflictState) {
       return;
     }
 
     const nextJson = serializeTasks(tasks);
 
-    if (nextJson === lastSyncedJsonRef.current) {
+    if (lastSyncedJsonRef.current !== null && nextJson === lastSyncedJsonRef.current) {
       return;
     }
 
@@ -409,6 +545,10 @@ function App() {
             return;
           }
 
+          if (handleUnauthorizedError(error)) {
+            return;
+          }
+
           if (error instanceof ApiError && error.status === 409 && isConflictStatePayload(error.payload)) {
             setConflictState(error.payload);
             setSyncStatus('conflict');
@@ -426,7 +566,105 @@ function App() {
       isCancelled = true;
       window.clearTimeout(timeoutId);
     };
-  }, [conflictState, tasks]);
+  }, [authStatus, conflictState, tasks]);
+
+  useEffect(() => {
+    if (!draggedTaskId) {
+      dragPointerYRef.current = null;
+
+      if (dragScrollFrameRef.current !== null) {
+        window.cancelAnimationFrame(dragScrollFrameRef.current);
+        dragScrollFrameRef.current = null;
+      }
+
+      return;
+    }
+
+    function handleWindowDragOver(event: DragEvent) {
+      dragPointerYRef.current = event.clientY;
+    }
+
+    function stepWindowScroll() {
+      const pointerY = dragPointerYRef.current;
+
+      if (pointerY !== null) {
+        const viewportHeight = window.innerHeight;
+        const distanceToTop = pointerY;
+        const distanceToBottom = viewportHeight - pointerY;
+        let nextDelta = 0;
+
+        if (distanceToTop < DRAG_SCROLL_EDGE_THRESHOLD_PX) {
+          const intensity = (DRAG_SCROLL_EDGE_THRESHOLD_PX - distanceToTop) / DRAG_SCROLL_EDGE_THRESHOLD_PX;
+          nextDelta = -(DRAG_SCROLL_MAX_STEP_PX * intensity * intensity);
+        } else if (distanceToBottom < DRAG_SCROLL_EDGE_THRESHOLD_PX) {
+          const intensity = (DRAG_SCROLL_EDGE_THRESHOLD_PX - distanceToBottom) / DRAG_SCROLL_EDGE_THRESHOLD_PX;
+          nextDelta = DRAG_SCROLL_MAX_STEP_PX * intensity * intensity;
+        }
+
+        if (nextDelta !== 0) {
+          const maxScrollTop = Math.max(0, document.documentElement.scrollHeight - viewportHeight);
+          const nextScrollTop = Math.min(maxScrollTop, Math.max(0, window.scrollY + nextDelta));
+
+          if (Math.abs(nextScrollTop - window.scrollY) > 0.1) {
+            window.scrollTo({ top: nextScrollTop, behavior: 'auto' });
+          }
+        }
+      }
+
+      dragScrollFrameRef.current = window.requestAnimationFrame(stepWindowScroll);
+    }
+
+    window.addEventListener('dragover', handleWindowDragOver, true);
+    dragScrollFrameRef.current = window.requestAnimationFrame(stepWindowScroll);
+
+    return () => {
+      window.removeEventListener('dragover', handleWindowDragOver, true);
+      dragPointerYRef.current = null;
+
+      if (dragScrollFrameRef.current !== null) {
+        window.cancelAnimationFrame(dragScrollFrameRef.current);
+        dragScrollFrameRef.current = null;
+      }
+    };
+  }, [draggedTaskId]);
+
+  async function handleLogin(username: string, password: string): Promise<void> {
+    setIsAuthSubmitting(true);
+    setAuthError(null);
+
+    try {
+      const user = await loginToServer(username, password);
+      hasInitializedSyncRef.current = false;
+      lastBackedUpVersionRef.current = null;
+      setCurrentUser(user);
+      setAuthStatus('authenticated');
+      setAuthError(null);
+      setSyncStatus('syncing');
+      setSyncTooltip('Подключаемся к серверу…');
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 401) {
+        setAuthError('Неверный логин или пароль.');
+        return;
+      }
+
+      setAuthError('Не удалось подключиться к серверу. Попробуйте ещё раз.');
+    } finally {
+      setIsAuthSubmitting(false);
+    }
+  }
+
+  async function handleLogout(): Promise<void> {
+    setIsLoggingOut(true);
+
+    try {
+      await logoutFromServer();
+    } catch {
+      // logout should still clear local auth state
+    } finally {
+      setIsLoggingOut(false);
+      moveToUnauthenticatedState(LOGIN_REQUIRED_TOOLTIP, null);
+    }
+  }
 
   const openTasks = tasks.filter((task) => task.status === 'open');
   const archiveTasks = [...tasks]
@@ -494,7 +732,7 @@ function App() {
     );
   }
 
-  function archiveTask(taskId: string) {
+  function finalizeArchiveTask(taskId: string) {
     setTasks((current) =>
       current.map((task) =>
         task.id === taskId
@@ -507,6 +745,27 @@ function App() {
       ),
     );
     setSelectedTaskId(null);
+  }
+
+  function archiveTask(taskId: string) {
+    const task = latestTasksRef.current.find((candidate) => candidate.id === taskId);
+
+    if (!task || task.status !== 'open') {
+      return;
+    }
+
+    if (closingTimeoutsRef.current[taskId]) {
+      return;
+    }
+
+    setSelectedTaskId((current) => (current === taskId ? null : current));
+    setClosingTaskIds((current) => (current.includes(taskId) ? current : [...current, taskId]));
+
+    closingTimeoutsRef.current[taskId] = window.setTimeout(() => {
+      finalizeArchiveTask(taskId);
+      setClosingTaskIds((current) => current.filter((candidate) => candidate !== taskId));
+      delete closingTimeoutsRef.current[taskId];
+    }, TASK_CLOSE_ANIMATION_MS);
   }
 
   function restoreTask(taskId: string) {
@@ -524,7 +783,15 @@ function App() {
   }
 
   function deleteTask(taskId: string) {
+    const closingTimeoutId = closingTimeoutsRef.current[taskId];
+
+    if (closingTimeoutId) {
+      window.clearTimeout(closingTimeoutId);
+      delete closingTimeoutsRef.current[taskId];
+    }
+
     setTasks((current) => current.filter((task) => task.id !== taskId));
+    setClosingTaskIds((current) => current.filter((candidate) => candidate !== taskId));
     setSelectedTaskId((current) => (current === taskId ? null : current));
   }
 
@@ -561,6 +828,10 @@ function App() {
     });
   }
 
+  if (authStatus !== 'authenticated') {
+    return <LoginScreen error={authError} isLoading={authStatus === 'loading'} isSubmitting={isAuthSubmitting} onLogin={handleLogin} />;
+  }
+
   return (
     <div className="app">
       <div className="app__inner">
@@ -569,11 +840,13 @@ function App() {
           screen={screen}
           currentUser={currentUser}
           isBackuping={isBackuping}
+          isLoggingOut={isLoggingOut}
           syncStatus={syncStatus}
           syncTooltip={syncTooltip}
           onBackup={() => backupRunnerRef.current('manual')}
-          onToggleScreen={() => navigateToScreen(screen === 'active' ? 'archive' : 'active')}
           onCreate={() => setCreateModalOpen(true)}
+          onLogout={() => void handleLogout()}
+          onToggleScreen={() => navigateToScreen(screen === 'active' ? 'archive' : 'active')}
         />
 
         {conflictState && (
@@ -581,8 +854,8 @@ function App() {
             <div className="sync-alert__copy">
               <strong>Конфликт синхронизации</strong>
               <span>
-                На другом устройстве сохранена более новая версия. Локальные изменения не будут отправляться,
-                пока вы не загрузите состояние с сервера.
+                На сервере уже есть другая версия. Текущее локальное состояние сохранено в браузере и не будет
+                отправляться, пока вы не разрешите конфликт.
               </span>
             </div>
 
@@ -609,7 +882,7 @@ function App() {
                     draggedTaskId={draggedTaskId}
                     draggedTaskCategory={draggedTask?.category ?? null}
                     isDropTarget={dropTargetCategory === category.key}
-                    onDropTargetChange={updateDropTarget}
+                    closingTaskIds={closingTaskIds}
                     onCreate={(title) =>
                       createTask({
                         title,
@@ -618,11 +891,12 @@ function App() {
                         deadline: { kind: 'none' },
                       })
                     }
-                    onTaskDragStart={startTaskDrag}
+                    onDropTargetChange={updateDropTarget}
+                    onQuickClose={(taskId) => archiveTask(taskId)}
                     onTaskDragEnd={endTaskDrag}
+                    onTaskDragStart={startTaskDrag}
                     onTaskDrop={moveTaskToCategory}
                     onTaskOpen={setSelectedTaskId}
-                    onQuickClose={archiveTask}
                   />
                 );
               })}
@@ -633,8 +907,8 @@ function App() {
             <ArchiveList
               tasks={archiveTasks}
               categories={CATEGORIES}
-              onRestore={restoreTask}
               onDelete={deleteTask}
+              onRestore={restoreTask}
             />
           </main>
         )}
@@ -643,10 +917,10 @@ function App() {
       <TaskDetailsModal
         task={selectedTask}
         categories={CATEGORIES}
-        onClose={() => setSelectedTaskId(null)}
-        onSave={updateTask}
         onArchive={archiveTask}
+        onClose={() => setSelectedTaskId(null)}
         onDelete={deleteTask}
+        onSave={updateTask}
       />
 
       <CreateTaskModal

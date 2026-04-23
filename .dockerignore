@@ -3,8 +3,10 @@ dist
 .git
 .claude
 .obsidian
-server
 backups
 .env
 design
 docs
+.docs
+server/node_modules
+server/dist

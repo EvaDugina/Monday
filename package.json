@@ -8,7 +8,8 @@
     "build:web": "tsc --noEmit && vite build",
     "build:api": "npm --prefix server run build",
     "dev": "docker compose -f deploy/compose.dev.yml up --build",
-    "deploy:prod": "docker compose --env-file .env -f deploy/compose.production.yml up -d --build"
+    "deploy:prod": "docker compose --env-file .env -f deploy/compose.production.yml up -d --build",
+    "deploy:timeweb": "docker compose --env-file deploy/timeweb.env -f deploy/compose.timeweb.yml up -d --build"
   },
   "dependencies": {
     "lucide-react": "^1.8.0",
