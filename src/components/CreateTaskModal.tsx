@@ -97,8 +97,18 @@ function CreateTaskModal({
           </div>
 
           <div className="modal__body">
-            <label className="form-field">
-              <span className="form-label">Название</span>
+            <div className="form-field">
+              <div className="form-field__header">
+                <span className="form-label">Название</span>
+                <button
+                  type="button"
+                  className={`toggle-badge${urgent ? ' toggle-badge--active' : ''}`}
+                  aria-pressed={urgent}
+                  onClick={() => setUrgent((current) => !current)}
+                >
+                  срочно
+                </button>
+              </div>
               <input
                 autoFocus
                 className="text-input"
@@ -107,7 +117,7 @@ function CreateTaskModal({
                 onChange={(event) => setTitle(event.target.value)}
                 placeholder="Например: выбрать врача"
               />
-            </label>
+            </div>
 
             <label className="form-field">
               <span className="form-label">Описание</span>
@@ -137,19 +147,10 @@ function CreateTaskModal({
               </div>
             </div>
 
-            <label className="form-field">
+            <div className="form-field">
               <span className="form-label">Срок</span>
               <DeadlineEditor value={deadline} onChange={setDeadline} />
-            </label>
-
-            <label className="form-field form-field--inline">
-              <input
-                type="checkbox"
-                checked={urgent}
-                onChange={(event) => setUrgent(event.target.checked)}
-              />
-              <span className="form-label">Отметить как срочную</span>
-            </label>
+            </div>
           </div>
 
           <div className="modal__footer">

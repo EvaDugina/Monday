@@ -642,6 +642,7 @@ function App() {
 
       <TaskDetailsModal
         task={selectedTask}
+        categories={CATEGORIES}
         onClose={() => setSelectedTaskId(null)}
         onSave={updateTask}
         onArchive={archiveTask}

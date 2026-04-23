@@ -1,18 +1,25 @@
 import { useEffect, useState } from 'react';
-import type { Deadline, Task } from '../types';
+import type { Category, Deadline, Task } from '../types';
 import DeadlineEditor from './DeadlineEditor';
+
+interface CategoryOption {
+  key: Category;
+  label: string;
+}
 
 interface TaskDetailsModalProps {
   task: Task | null;
+  categories: CategoryOption[];
   onClose: () => void;
   onSave: (task: Task) => void;
   onArchive: (taskId: string) => void;
   onDelete: (taskId: string) => void;
 }
 
-function TaskDetailsModal({ task, onClose, onSave, onArchive, onDelete }: TaskDetailsModalProps) {
+function TaskDetailsModal({ task, categories, onClose, onSave, onArchive, onDelete }: TaskDetailsModalProps) {
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
+  const [category, setCategory] = useState<Category>('passion');
   const [deadline, setDeadline] = useState<Deadline>({ kind: 'none' });
   const [urgent, setUrgent] = useState(false);
 
@@ -23,6 +30,7 @@ function TaskDetailsModal({ task, onClose, onSave, onArchive, onDelete }: TaskDe
 
     setTitle(task.title);
     setDescription(task.description);
+    setCategory(task.category);
     setDeadline(task.deadline);
     setUrgent(task.urgent);
   }, [task]);
@@ -59,6 +67,7 @@ function TaskDetailsModal({ task, onClose, onSave, onArchive, onDelete }: TaskDe
       ...currentTask,
       title: trimmedTitle,
       description: description.trim(),
+      category,
       deadline,
       urgent,
     });
@@ -77,15 +86,25 @@ function TaskDetailsModal({ task, onClose, onSave, onArchive, onDelete }: TaskDe
         </div>
 
         <div className="modal__body">
-          <label className="form-field">
-            <span className="form-label">Название</span>
+          <div className="form-field">
+            <div className="form-field__header">
+              <span className="form-label">Название</span>
+              <button
+                type="button"
+                className={`toggle-badge${urgent ? ' toggle-badge--active' : ''}`}
+                aria-pressed={urgent}
+                onClick={() => setUrgent((current) => !current)}
+              >
+                срочно
+              </button>
+            </div>
             <input
               className="text-input"
               type="text"
               value={title}
               onChange={(event) => setTitle(event.target.value)}
             />
-          </label>
+          </div>
 
           <label className="form-field">
             <span className="form-label">Описание</span>
@@ -97,19 +116,27 @@ function TaskDetailsModal({ task, onClose, onSave, onArchive, onDelete }: TaskDe
             />
           </label>
 
-          <label className="form-field">
+          <div className="form-field">
+            <span className="form-label">Категория</span>
+            <div className="category-picker">
+              {categories.map((option) => (
+                <button
+                  key={option.key}
+                  type="button"
+                  className={`chip${category === option.key ? ' chip--active' : ''}`}
+                  data-category={option.key}
+                  onClick={() => setCategory(option.key)}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="form-field">
             <span className="form-label">Срок</span>
             <DeadlineEditor value={deadline} onChange={setDeadline} />
-          </label>
-
-          <label className="form-field form-field--inline">
-            <input
-              type="checkbox"
-              checked={urgent}
-              onChange={(event) => setUrgent(event.target.checked)}
-            />
-            <span className="form-label">Отметить как срочную</span>
-          </label>
+          </div>
         </div>
 
         <div className="modal__footer">
@@ -118,7 +145,7 @@ function TaskDetailsModal({ task, onClose, onSave, onArchive, onDelete }: TaskDe
               Удалить навсегда
             </button>
             <button type="button" className="button button--secondary" onClick={() => onArchive(currentTask.id)}>
-              Закрыть в архив
+              Закрыть
             </button>
           </div>
 

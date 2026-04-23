@@ -41,15 +41,10 @@ function Header({
     <header className="header">
       <div className="header__brand">
         <h1 className="header__title">MONDAY</h1>
-        <span
-          className="sync-status"
-          title={combinedTooltip}
-          aria-label={combinedTooltip}
-        >
+        <span className="sync-status has-tooltip" data-tooltip={combinedTooltip} aria-label={combinedTooltip}>
           <button
             type="button"
             className={`sync-status__dot sync-status__dot--${syncStatus}`}
-            title={backupTooltip}
             aria-label={backupTooltip}
             aria-busy={isBackuping}
             disabled={isBackuping}

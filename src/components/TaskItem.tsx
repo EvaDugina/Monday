@@ -29,11 +29,11 @@ function TaskItem({ task, isDragging = false, onDragStart, onDragEnd, onOpen, on
           type="button"
           className="task-card__checkbox"
           onClick={onQuickClose}
-          aria-label="Закрыть задачу в архив"
+          aria-label="Закрыть задачу"
         />
       )}
 
-      <button type="button" className="task-card__main" onClick={onOpen} title="Перетащите задачу в другой раздел">
+      <button type="button" className="task-card__main" onClick={onOpen}>
         <div className="task-card__headline">
           {task.urgent && <span className="task-card__urgent-badge">СРОЧНО</span>}
           <span className="task-card__title">{task.title}</span>
@@ -60,7 +60,8 @@ function TaskItem({ task, isDragging = false, onDragStart, onDragEnd, onOpen, on
       </button>
 
       <div
-        className="task-card__drag-handle"
+        className="task-card__drag-handle has-tooltip"
+        data-tooltip="Перетащить задачу в другой раздел"
         draggable
         role="button"
         tabIndex={0}
@@ -68,7 +69,6 @@ function TaskItem({ task, isDragging = false, onDragStart, onDragEnd, onOpen, on
         aria-grabbed={isDragging}
         onDragStart={handleDragStart}
         onDragEnd={onDragEnd}
-        title="Перетащить задачу в другой раздел"
       >
         <GripVertical size={15} strokeWidth={1.75} aria-hidden="true" />
       </div>

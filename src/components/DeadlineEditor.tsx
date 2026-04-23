@@ -1,5 +1,5 @@
 import type { Deadline } from '../types';
-import { getWeekdayLabel } from '../utils/dates';
+import { getDateQuickPresets, getRangeQuickPresets, getWeekdayLabel } from '../utils/dates';
 
 interface DeadlineEditorProps {
   value: Deadline;
@@ -7,6 +7,9 @@ interface DeadlineEditorProps {
 }
 
 function DeadlineEditor({ value, onChange }: DeadlineEditorProps) {
+  const dateQuickPresets = getDateQuickPresets();
+  const rangeQuickPresets = getRangeQuickPresets();
+
   function handleKindChange(kind: Deadline['kind']) {
     switch (kind) {
       case 'none':
@@ -36,7 +39,7 @@ function DeadlineEditor({ value, onChange }: DeadlineEditorProps) {
     <div className="deadline-editor">
       <div className="deadline-editor__modes" role="radiogroup" aria-label="Тип срока">
         {[
-          { kind: 'none' as const, label: 'Без срока' },
+          { kind: 'none' as const, label: 'Бессрочно' },
           { kind: 'date' as const, label: 'Дата' },
           { kind: 'range' as const, label: 'Диапазон' },
           { kind: 'recurring' as const, label: 'Повтор' },
@@ -54,36 +57,68 @@ function DeadlineEditor({ value, onChange }: DeadlineEditorProps) {
       </div>
 
       {value.kind === 'date' && (
-        <input
-          className="text-input"
-          type="date"
-          value={value.date}
-          onChange={(event) => onChange({ kind: 'date', date: event.target.value })}
-        />
+        <>
+          <input
+            className="text-input"
+            type="date"
+            value={value.date}
+            onChange={(event) => onChange({ kind: 'date', date: event.target.value })}
+          />
+
+          <div className="deadline-editor__presets" aria-label="Быстрый выбор даты">
+            {dateQuickPresets.map((preset) => (
+              <button
+                key={preset.label}
+                type="button"
+                className={`shortcut-badge${value.date === preset.value ? ' shortcut-badge--active' : ''}`}
+                onClick={() => onChange({ kind: 'date', date: preset.value })}
+              >
+                {preset.label}
+              </button>
+            ))}
+          </div>
+        </>
       )}
 
       {value.kind === 'range' && (
-        <div className="deadline-editor__grid">
-          <label className="form-field">
-            <span className="form-label">С</span>
-            <input
-              className="text-input"
-              type="date"
-              value={value.from}
-              onChange={(event) => onChange({ ...value, from: event.target.value })}
-            />
-          </label>
+        <>
+          <div className="deadline-editor__grid">
+            <label className="form-field">
+              <span className="form-label">С</span>
+              <input
+                className="text-input"
+                type="date"
+                value={value.from}
+                onChange={(event) => onChange({ ...value, from: event.target.value })}
+              />
+            </label>
 
-          <label className="form-field">
-            <span className="form-label">По</span>
-            <input
-              className="text-input"
-              type="date"
-              value={value.to}
-              onChange={(event) => onChange({ ...value, to: event.target.value })}
-            />
-          </label>
-        </div>
+            <label className="form-field">
+              <span className="form-label">По</span>
+              <input
+                className="text-input"
+                type="date"
+                value={value.to}
+                onChange={(event) => onChange({ ...value, to: event.target.value })}
+              />
+            </label>
+          </div>
+
+          <div className="deadline-editor__presets" aria-label="Быстрый выбор диапазона">
+            {rangeQuickPresets.map((preset) => (
+              <button
+                key={preset.label}
+                type="button"
+                className={`shortcut-badge${
+                  value.from === preset.from && value.to === preset.to ? ' shortcut-badge--active' : ''
+                }`}
+                onClick={() => onChange({ kind: 'range', from: preset.from, to: preset.to })}
+              >
+                {preset.label}
+              </button>
+            ))}
+          </div>
+        </>
       )}
 
       {value.kind === 'recurring' && (
