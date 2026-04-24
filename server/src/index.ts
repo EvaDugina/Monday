@@ -12,7 +12,7 @@ import {
   resolveAuthConfig,
   verifyLocalCredentials,
 } from './auth.js';
-import { attachRequestId, createRateLimiter, requestLogger } from './http.js';
+import { attachRequestId, createRateLimiter, requestLogger, securityHeaders } from './http.js';
 import { ValidationError, parseLoginPayload, parseTasksPayload } from './schema.js';
 
 const app = express();
@@ -35,10 +35,13 @@ const staticRoot = process.env.STATIC_ROOT?.trim() ? resolve(process.cwd(), proc
 const staticIndexPath = staticRoot ? join(staticRoot, 'index.html') : null;
 const router = express.Router();
 
+const hstsEnabled = (process.env.HSTS_ENABLED ?? (debugMode ? 'false' : 'true')) === 'true';
+
 app.disable('x-powered-by');
 app.set('trust proxy', 'loopback, linklocal, uniquelocal');
-app.use(express.json({ limit: '1mb' }));
 app.use(attachRequestId());
+app.use(securityHeaders({ enableHsts: hstsEnabled }));
+app.use(express.json({ limit: '2mb' }));
 app.use(attachAuthContext(authConfig));
 app.use(requestLogger());
 
@@ -64,6 +67,12 @@ const backupLimiter = createRateLimiter({
   name: 'backup',
   windowMs: 60_000,
   limit: 12,
+});
+
+const healthLimiter = createRateLimiter({
+  name: 'health',
+  windowMs: 60_000,
+  limit: 240,
 });
 
 function getBackupOwner(request: Request) {
@@ -96,11 +105,11 @@ function parseBackupSource(value: unknown): 'auto' | 'manual' {
   throw new ValidationError('source must be "auto" or "manual"');
 }
 
-router.get('/api/health/live', (_request, response) => {
+router.get('/api/health/live', healthLimiter, (_request, response) => {
   response.json({ ok: true });
 });
 
-router.get('/api/health/ready', (_request, response) => {
+router.get('/api/health/ready', healthLimiter, (_request, response) => {
   if (!isDatabaseReady()) {
     response.status(503).json({ ok: false });
     return;
@@ -109,7 +118,7 @@ router.get('/api/health/ready', (_request, response) => {
   response.json({ ok: true });
 });
 
-router.get('/api/health', (_request, response) => {
+router.get('/api/health', healthLimiter, (_request, response) => {
   if (!isDatabaseReady()) {
     response.status(503).json({ ok: false });
     return;
@@ -119,16 +128,27 @@ router.get('/api/health', (_request, response) => {
 });
 
 if (authConfig.mode === 'local') {
-  router.post('/api/auth/login', authLimiter, (request, response) => {
-    const payload = parseLoginPayload(request.body);
+  router.post('/api/auth/login', authLimiter, (request, response, next) => {
+    let payload: ReturnType<typeof parseLoginPayload>;
 
-    if (!verifyLocalCredentials(authConfig, payload.username, payload.password)) {
-      response.status(401).json({ error: 'Invalid credentials' });
+    try {
+      payload = parseLoginPayload(request.body);
+    } catch (error) {
+      next(error);
       return;
     }
 
-    issueLocalSession(response, authConfig);
-    response.json(getLocalUserPayload(authConfig));
+    verifyLocalCredentials(authConfig, payload.username, payload.password)
+      .then((authenticated) => {
+        if (!authenticated) {
+          response.status(401).json({ error: 'Invalid credentials' });
+          return;
+        }
+
+        issueLocalSession(response, authConfig);
+        response.json(getLocalUserPayload(authConfig));
+      })
+      .catch(next);
   });
 
   router.post('/api/auth/logout', requireAuth(), (_request, response) => {
@@ -205,6 +225,16 @@ app.use((error: unknown, request: Request, response: Response, _next: express.Ne
     'status' in error &&
     typeof (error as { status?: unknown }).status === 'number'
   ) {
+    console.warn(
+      JSON.stringify({
+        timestamp: new Date().toISOString(),
+        level: 'warn',
+        event: 'invalid_json_body',
+        requestId: request.requestId,
+        method: request.method,
+        path: request.originalUrl,
+      }),
+    );
     response.status(400).json({ error: 'Request body must be valid JSON' });
     return;
   }
@@ -279,7 +309,7 @@ function shutdown(signal: NodeJS.Signals): void {
       }),
     );
     process.exit(1);
-  }, 10_000).unref();
+  }, 20_000).unref();
 }
 
 process.on('SIGINT', () => shutdown('SIGINT'));

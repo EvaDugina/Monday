@@ -1,6 +1,19 @@
 import crypto from 'node:crypto';
 import type { Request, RequestHandler, Response } from 'express';
 
+function scryptAsync(password: string, salt: string, keylen: number): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    crypto.scrypt(password, salt, keylen, (error, derivedKey) => {
+      if (error) {
+        reject(error);
+        return;
+      }
+
+      resolve(derivedKey);
+    });
+  });
+}
+
 const DEFAULT_DEV_USER = {
   name: 'Local mode',
   username: 'local',
@@ -99,8 +112,16 @@ function safeEqual(left: string, right: string): boolean {
   return crypto.timingSafeEqual(leftBuffer, rightBuffer);
 }
 
-function hashPassword(password: string, salt: string): string {
-  return crypto.scryptSync(password, salt, 64).toString('hex');
+async function hashPassword(password: string, salt: string): Promise<Buffer> {
+  return scryptAsync(password, salt, 64);
+}
+
+function hashIdentifier(value: string): Buffer {
+  return crypto.createHash('sha256').update(value, 'utf8').digest();
+}
+
+function safeEqualHashedStrings(left: string, right: string): boolean {
+  return crypto.timingSafeEqual(hashIdentifier(left), hashIdentifier(right));
 }
 
 function signSessionPayload(payload: string, secret: string): string {
@@ -312,16 +333,20 @@ export function getCurrentUserPayload(request: Request, config: AuthConfig): Cur
   };
 }
 
-export function verifyLocalCredentials(config: AuthConfig, username: string, password: string): boolean {
+export async function verifyLocalCredentials(
+  config: AuthConfig,
+  username: string,
+  password: string,
+): Promise<boolean> {
   if (config.mode !== 'local') {
     return false;
   }
 
-  if (!safeEqual(username, config.username)) {
-    return false;
-  }
+  const usernameMatches = safeEqualHashedStrings(username, config.username);
+  const derivedHex = (await hashPassword(password, config.passwordSalt)).toString('hex');
+  const passwordMatches = safeEqual(derivedHex, config.passwordHash);
 
-  return safeEqual(hashPassword(password, config.passwordSalt), config.passwordHash);
+  return usernameMatches && passwordMatches;
 }
 
 export function issueLocalSession(response: Response, config: AuthConfig): void {

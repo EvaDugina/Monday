@@ -11,6 +11,7 @@ BACKUP_FILE="$(cd "$(dirname "$1")" && pwd)/$(basename "$1")"
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 COMPOSE_FILE="${COMPOSE_FILE:-$ROOT_DIR/deploy/compose.production.yml}"
 ENV_FILE="${ENV_FILE:-$ROOT_DIR/.env}"
+MONDAY_SERVICE="${MONDAY_SERVICE:-api}"
 VOLUME_NAME="${SQLITE_VOLUME_NAME:-monday_sqlite_data}"
 
 if [[ -n "${MSYSTEM:-}" ]]; then
@@ -39,7 +40,7 @@ docker_run() {
   fi
 }
 
-docker_compose --env-file "$ENV_FILE_DOCKER" -f "$COMPOSE_FILE_DOCKER" stop api
+docker_compose --env-file "$ENV_FILE_DOCKER" -f "$COMPOSE_FILE_DOCKER" stop "$MONDAY_SERVICE"
 
 if [[ "$BACKUP_FILE" == *.gz ]]; then
   docker_run --rm \
@@ -55,6 +56,6 @@ else
     sh -lc 'rm -f /data/monday.sqlite /data/monday.sqlite-wal /data/monday.sqlite-shm && cp /backup/input.sqlite /data/monday.sqlite && chown -R 1000:1000 /data'
 fi
 
-docker_compose --env-file "$ENV_FILE_DOCKER" -f "$COMPOSE_FILE_DOCKER" up -d api
+docker_compose --env-file "$ENV_FILE_DOCKER" -f "$COMPOSE_FILE_DOCKER" up -d "$MONDAY_SERVICE"
 
 echo "SQLite database restored from $BACKUP_FILE"

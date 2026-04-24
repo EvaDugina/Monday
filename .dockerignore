@@ -5,8 +5,8 @@ dist
 .obsidian
 backups
 .env
+deploy/timeweb.env
 design
-docs
 .docs
 server/node_modules
 server/dist

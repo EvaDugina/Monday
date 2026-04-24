@@ -4,9 +4,9 @@
 
 - Статус: approved
 - Владелец: команда проекта
-- Последнее обновление: 2026-04-23
+- Последнее обновление: 2026-04-24
 - Стадия проекта: `POC B`
-- Версия проекта: `v0.1.0`
+- Версия проекта: `v0.1.1`
 - Предыдущая версия: `не применимо`
 - Следующий целевой этап: `MVP A`
 - Архив финальной версии предыдущего этапа: `не применимо, каноническая пара документов вводится впервые`
@@ -261,10 +261,13 @@
 
 ### 7.2. Нефункциональные требования в реализации
 
-- сервер валидирует payload задач по схеме и длинам полей
-- API отключает `x-powered-by`, ограничивает request body и использует request timeout
-- health endpoints `live`, `ready`, `health` служат основой для compose healthchecks
+- сервер валидирует payload задач по схеме и длинам полей; `MAX_TASKS=500`, `MAX_DESCRIPTION_LENGTH=2000`, `MAX_TITLE_LENGTH=200`, body limit `2 MB`
+- API отключает `x-powered-by`, ограничивает request body и использует request timeout; `graceful shutdown timeout > requestTimeout`
+- health endpoints `live`, `ready`, `health` служат основой для compose healthchecks и rate-limited
 - production API должен быть закрыт за proxy/auth контуром
+- API выставляет security-заголовки (`X-Content-Type-Options`, `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`, `Cross-Origin-Opener-Policy`, `Cross-Origin-Resource-Policy`, `Permissions-Policy`); `Strict-Transport-Security` включается при `HSTS_ENABLED=true` (авто в production)
+- проверка пароля идёт через асинхронный `crypto.scrypt`, сравнение username — через `timingSafeEqual` над SHA-256 хэшами, чтобы не утекала длина
+- CSRF не защищён отдельным токеном: модель опирается на `SameSite=Lax`, JSON-only API и принудительный `Content-Type: application/json`; нельзя принимать `application/x-www-form-urlencoded`/`multipart` на write-эндпойнтах без явного CSRF-контура
 
 ### 7.3. Наблюдаемость и диагностика
 
@@ -497,3 +500,4 @@
 - История ниже ведется только в рамках текущего этапа.
 - Межэтапная история сохраняется через архив финальной версии этапа.
 - `2026-04-23 | v0.1.0 | тип: mixed | важность: важно в документации | впервые создан канонический technical document для MONDAY и зафиксирован фактический POC B контур`
+- `2026-04-24 | v0.1.1 | тип: hardening | важность: важно для hosted-контура | security headers, async scrypt + SHA-256 comparison, rate-limit на health, согласование payload-лимитов, параметризация backup/restore для timeweb, CSRF-модель зафиксирована как SameSite+JSON-only`

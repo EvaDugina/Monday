@@ -13,6 +13,27 @@ export function attachRequestId(): RequestHandler {
   };
 }
 
+interface SecurityHeadersOptions {
+  enableHsts: boolean;
+}
+
+export function securityHeaders({ enableHsts }: SecurityHeadersOptions): RequestHandler {
+  return (_request, response, next) => {
+    response.setHeader('X-Content-Type-Options', 'nosniff');
+    response.setHeader('X-Frame-Options', 'DENY');
+    response.setHeader('Referrer-Policy', 'no-referrer');
+    response.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
+    response.setHeader('Cross-Origin-Resource-Policy', 'same-origin');
+    response.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+
+    if (enableHsts) {
+      response.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+    }
+
+    next();
+  };
+}
+
 export function requestLogger(): RequestHandler {
   return (request, response, next) => {
     const startedAt = process.hrtime.bigint();

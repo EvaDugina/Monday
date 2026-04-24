@@ -3,10 +3,10 @@ const STATUSES = new Set(['open', 'closed']);
 const DEADLINE_KINDS = new Set(['none', 'date', 'range', 'recurring']);
 const RECURRING_MODES = new Set(['day', 'week', 'month']);
 
-const MAX_TASKS = 2000;
+const MAX_TASKS = 500;
 const MAX_ID_LENGTH = 128;
 const MAX_TITLE_LENGTH = 200;
-const MAX_DESCRIPTION_LENGTH = 5000;
+const MAX_DESCRIPTION_LENGTH = 2000;
 
 export interface ApiDeadlineNone {
   kind: 'none';

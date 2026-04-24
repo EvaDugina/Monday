@@ -21,10 +21,10 @@ npm run dev
 ### Timeweb VPS / nginx / `/monday`
 
 1. Скопируйте `deploy/timeweb.env.example` в `deploy/timeweb.env`.
-2. Сгенерируйте хэш пароля:
+2. Сгенерируйте хэш пароля в контейнере (без локального `node`):
 
 ```bash
-node scripts/generate-auth-hash.mjs "your-password"
+docker run --rm -v "$(pwd)":/app -w /app node:20-alpine node scripts/generate-auth-hash.mjs "your-password"
 ```
 
 3. Вставьте `MONDAY_AUTH_PASSWORD_SALT`, `MONDAY_AUTH_PASSWORD_HASH` и `MONDAY_SESSION_SECRET` в `deploy/timeweb.env`.
@@ -41,7 +41,22 @@ npm run deploy:timeweb
 ./scripts/smoke-timeweb.sh
 ```
 
-Первый запуск допускается по `http://IP/monday`, но для постоянного публичного доступа следующий обязательный шаг — включить `HTTPS` по IP и перевести `SESSION_COOKIE_SECURE=true`.
+Первый запуск допускается по `http://IP/monday`, но для постоянного публичного доступа следующий обязательный шаг — включить `HTTPS`, перевести `SESSION_COOKIE_SECURE=true`, а затем ротировать `MONDAY_SESSION_SECRET`, чтобы инвалидировать сессии, выданные по HTTP.
+
+Для backup/restore в timeweb-контуре переопределите имя сервиса и volume, т.к. значения по умолчанию заточены под legacy-стек:
+
+```bash
+MONDAY_SERVICE=monday \
+  COMPOSE_FILE=deploy/compose.timeweb.yml \
+  ENV_FILE=deploy/timeweb.env \
+  ./scripts/backup-monday-sqlite.sh
+
+MONDAY_SERVICE=monday \
+  SQLITE_VOLUME_NAME=monday_timeweb_sqlite_data \
+  COMPOSE_FILE=deploy/compose.timeweb.yml \
+  ENV_FILE=deploy/timeweb.env \
+  ./scripts/restore-monday-sqlite.sh backups/sqlite/<file>.sqlite.gz
+```
 
 ### Legacy domain stack
 
