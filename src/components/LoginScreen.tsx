@@ -10,6 +10,7 @@ interface LoginScreenProps {
 function LoginScreen({ error, isLoading = false, isSubmitting = false, onLogin }: LoginScreenProps) {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [isPasswordVisible, setIsPasswordVisible] = useState(false);
   const isBusy = isLoading || isSubmitting;
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -37,6 +38,10 @@ function LoginScreen({ error, isLoading = false, isSubmitting = false, onLogin }
             <span className="form-label">Логин</span>
             <input
               autoComplete="username"
+              autoCapitalize="none"
+              autoCorrect="off"
+              spellCheck={false}
+              enterKeyHint="next"
               className="text-input"
               disabled={isBusy}
               name="username"
@@ -48,15 +53,31 @@ function LoginScreen({ error, isLoading = false, isSubmitting = false, onLogin }
 
           <label className="form-field">
             <span className="form-label">Пароль</span>
-            <input
-              autoComplete="current-password"
-              className="text-input"
-              disabled={isBusy}
-              name="password"
-              type="password"
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-            />
+            <div className="password-input">
+              <input
+                autoComplete="current-password"
+                autoCapitalize="none"
+                autoCorrect="off"
+                spellCheck={false}
+                enterKeyHint="go"
+                className="text-input password-input__field"
+                disabled={isBusy}
+                name="password"
+                type={isPasswordVisible ? 'text' : 'password'}
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+              />
+              <button
+                type="button"
+                className="password-input__toggle"
+                aria-label={isPasswordVisible ? 'Скрыть пароль' : 'Показать пароль'}
+                aria-pressed={isPasswordVisible}
+                disabled={isBusy}
+                onClick={() => setIsPasswordVisible((value) => !value)}
+              >
+                {isPasswordVisible ? 'скрыть' : 'показать'}
+              </button>
+            </div>
           </label>
 
           {error && (

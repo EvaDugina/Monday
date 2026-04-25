@@ -138,7 +138,11 @@ function CategorySection({
             />
           ))
         ) : (
-          <div className="empty-state">Пока пусто. Добавьте первую задачу через поле ниже.</div>
+          <div className="empty-state">
+            Пока пусто. Добавьте задачу через поле ниже
+            <span className="empty-state__hint-touch"> или откройте карточку, чтобы выбрать раздел</span>
+            .
+          </div>
         )}
       </div>
 

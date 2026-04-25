@@ -97,15 +97,16 @@ function TaskItem({
 
       <div
         className="task-card__drag-handle has-tooltip has-tooltip--end"
-        data-tooltip="Перетащите или нажмите Enter, чтобы открыть"
-        title="Перетащите или нажмите Enter, чтобы открыть"
+        data-tooltip="Перетащите, чтобы сменить раздел, или нажмите чтобы открыть"
+        title="Перетащите, чтобы сменить раздел, или нажмите чтобы открыть"
         draggable={!isClosing}
         role="button"
         tabIndex={isClosing ? -1 : 0}
-        aria-label="Перетащить задачу или открыть"
+        aria-label="Открыть задачу или перетащить в другой раздел"
         data-dragging={isDragging || undefined}
         onDragStart={handleDragStart}
         onDragEnd={onDragEnd}
+        onClick={isClosing ? undefined : onOpen}
         onKeyDown={handleActivationKey}
       >
         <GripVertical size={15} strokeWidth={1.75} aria-hidden="true" />
