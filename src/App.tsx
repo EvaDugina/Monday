@@ -25,6 +25,7 @@ import type {
   Deadline,
   Screen,
   ServerTasksState,
+  SyncStatus,
   Task,
 } from './types';
 import { compareIsoDates } from './utils/dates';
@@ -84,7 +85,6 @@ function normalizeDeadline(deadline: Deadline): Deadline {
   }
 }
 
-type SyncStatus = 'synced' | 'syncing' | 'offline' | 'conflict';
 type AuthStatus = 'loading' | 'unauthenticated' | 'authenticated';
 
 function formatDateTime(timestamp: string): string {
@@ -423,6 +423,12 @@ function App() {
         throw error;
       }
 
+      if (error instanceof ApiError && error.status === 400) {
+        setSyncStatus('invalid');
+        setSyncTooltip('Сервер отклонил данные. Проверьте длину названия и описания задачи.');
+        throw error;
+      }
+
       setSyncStatus('offline');
       setSyncTooltip('Сервер недоступен, изменения сохранены только локально.');
       throw error;
@@ -553,6 +559,12 @@ function App() {
             setConflictState(error.payload);
             setSyncStatus('conflict');
             setSyncTooltip('На сервере есть более новая версия. Загрузите её перед следующей записью.');
+            return;
+          }
+
+          if (error instanceof ApiError && error.status === 400) {
+            setSyncStatus('invalid');
+            setSyncTooltip('Сервер отклонил данные. Проверьте длину названия и описания задачи.');
             return;
           }
 

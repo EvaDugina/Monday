@@ -1,6 +1,4 @@
-import type { CurrentUser, Screen } from '../types';
-
-type SyncStatus = 'synced' | 'syncing' | 'offline' | 'conflict';
+import type { CurrentUser, Screen, SyncStatus } from '../types';
 
 interface HeaderProps {
   backupTooltip: string;
@@ -37,28 +35,28 @@ function Header({
         ? 'Сохраняем'
         : syncStatus === 'conflict'
           ? 'Конфликт'
-          : 'Оффлайн';
+          : syncStatus === 'invalid'
+            ? 'Ошибка данных'
+            : 'Оффлайн';
   const identityLabel = currentUser?.name || currentUser?.username || null;
-  const combinedTooltip = `${syncTooltip}\n${backupTooltip}`;
 
   return (
     <header className="header">
       <div className="header__brand">
         <h1 className="header__title">MONDAY</h1>
-        <span
-          className="sync-status has-tooltip has-tooltip--start"
-          data-tooltip={combinedTooltip}
-          aria-label={combinedTooltip}
-        >
+        <span className="sync-status has-tooltip has-tooltip--start" data-tooltip={syncTooltip}>
           <button
             type="button"
             className={`sync-status__dot sync-status__dot--${syncStatus}`}
             aria-label={backupTooltip}
+            title={backupTooltip}
             aria-busy={isBackuping}
             disabled={isBackuping}
             onClick={onBackup}
           />
-          <span className="sync-status__label">{syncLabel}</span>
+          <span className="sync-status__label" aria-label={syncTooltip}>
+            {syncLabel}
+          </span>
         </span>
         {identityLabel && <span className="header__identity">{identityLabel}</span>}
       </div>

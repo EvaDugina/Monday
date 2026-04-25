@@ -207,6 +207,10 @@
   background: var(--urgent);
 }
 
+.sync-status__dot--invalid {
+  background: var(--soon);
+}
+
 .sync-status__dot:focus-visible {
   outline: none;
   box-shadow: 0 0 0 4px color-mix(in srgb, var(--text) 14%, transparent);
@@ -580,9 +584,8 @@ button:disabled {
   position: relative;
 }
 
-.task-card__main:disabled {
-  color: inherit;
-  background: transparent;
+.task-card__main[aria-disabled='true'] {
+  cursor: default;
 }
 
 .task-card__main::after {

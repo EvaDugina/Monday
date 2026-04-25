@@ -36,6 +36,14 @@ function TaskItem({
     onDragStart?.();
   }
 
+  function handleActivationKey(event: React.KeyboardEvent<HTMLDivElement>) {
+    if (isClosing) return;
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      onOpen();
+    }
+  }
+
   return (
     <article
       className={`task-card${isDragging ? ' task-card--dragging' : ''}${isClosing ? ' task-card--closing' : ''}`}
@@ -44,14 +52,24 @@ function TaskItem({
       {onQuickClose && (
         <button
           type="button"
+          role="checkbox"
+          aria-checked="false"
           className="task-card__checkbox"
           onClick={onQuickClose}
           aria-label="Закрыть задачу"
+          title="Закрыть задачу"
           disabled={isClosing}
         />
       )}
 
-      <button type="button" className="task-card__main" onClick={onOpen} disabled={isClosing}>
+      <div
+        className="task-card__main"
+        role="button"
+        tabIndex={isClosing ? -1 : 0}
+        aria-disabled={isClosing || undefined}
+        onClick={isClosing ? undefined : onOpen}
+        onKeyDown={handleActivationKey}
+      >
         <div className="task-card__headline">
           {task.urgent && <span className="task-card__urgent-badge">СРОЧНО</span>}
           <span className="task-card__title">{task.title}</span>
@@ -75,18 +93,20 @@ function TaskItem({
             </span>
           </div>
         )}
-      </button>
+      </div>
 
       <div
         className="task-card__drag-handle has-tooltip has-tooltip--end"
-        data-tooltip="Перетащить задачу в другой раздел"
+        data-tooltip="Перетащите или нажмите Enter, чтобы открыть"
+        title="Перетащите или нажмите Enter, чтобы открыть"
         draggable={!isClosing}
         role="button"
         tabIndex={isClosing ? -1 : 0}
-        aria-label="Перетащить задачу в другой раздел"
-        aria-grabbed={isDragging}
+        aria-label="Перетащить задачу или открыть"
+        data-dragging={isDragging || undefined}
         onDragStart={handleDragStart}
         onDragEnd={onDragEnd}
+        onKeyDown={handleActivationKey}
       >
         <GripVertical size={15} strokeWidth={1.75} aria-hidden="true" />
       </div>

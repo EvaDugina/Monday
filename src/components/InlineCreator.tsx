@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { MAX_TITLE_LENGTH } from '../types';
 
 interface InlineCreatorProps {
   placeholder: string;
@@ -27,6 +28,7 @@ function InlineCreator({ placeholder, onCreate }: InlineCreatorProps) {
         className="text-input"
         type="text"
         value={title}
+        maxLength={MAX_TITLE_LENGTH}
         placeholder={placeholder}
         onChange={(event) => setTitle(event.target.value)}
       />

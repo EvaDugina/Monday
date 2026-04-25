@@ -48,3 +48,8 @@ export interface CurrentUser {
   username: string;
   name: string | null;
 }
+
+export const MAX_TITLE_LENGTH = 200;
+export const MAX_DESCRIPTION_LENGTH = 2000;
+
+export type SyncStatus = 'synced' | 'syncing' | 'offline' | 'conflict' | 'invalid';

@@ -1,5 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useId, useState } from 'react';
+import { useModalFocusTrap } from '../hooks/useModalFocusTrap';
 import type { Category, Deadline } from '../types';
+import { MAX_DESCRIPTION_LENGTH, MAX_TITLE_LENGTH } from '../types';
 import DeadlineEditor from './DeadlineEditor';
 
 interface CategoryOption {
@@ -33,6 +35,8 @@ function CreateTaskModal({
   const [category, setCategory] = useState<Category>(defaultCategory);
   const [deadline, setDeadline] = useState<Deadline>({ kind: 'none' });
   const [urgent, setUrgent] = useState(false);
+  const titleId = useId();
+  const modalRef = useModalFocusTrap(isOpen);
 
   useEffect(() => {
     if (!isOpen) {
@@ -86,10 +90,17 @@ function CreateTaskModal({
 
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <div className="modal" onClick={(event) => event.stopPropagation()}>
+      <div
+        ref={modalRef}
+        className="modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        onClick={(event) => event.stopPropagation()}
+      >
         <form onSubmit={handleSubmit}>
           <div className="modal__header">
-            <h2>Новая задача</h2>
+            <h2 id={titleId}>Новая задача</h2>
 
             <button type="button" className="button button--ghost" onClick={onClose}>
               Закрыть
@@ -114,6 +125,7 @@ function CreateTaskModal({
                 className="text-input"
                 type="text"
                 value={title}
+                maxLength={MAX_TITLE_LENGTH}
                 onChange={(event) => setTitle(event.target.value)}
                 placeholder="Например: выбрать врача"
               />
@@ -125,6 +137,7 @@ function CreateTaskModal({
                 className="text-input text-input--textarea"
                 rows={4}
                 value={description}
+                maxLength={MAX_DESCRIPTION_LENGTH}
                 onChange={(event) => setDescription(event.target.value)}
                 placeholder="Необязательно"
               />

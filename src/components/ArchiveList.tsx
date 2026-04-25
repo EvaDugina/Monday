@@ -20,6 +20,14 @@ function ArchiveList({ tasks, categories, onRestore, onDelete }: ArchiveListProp
     string
   >;
 
+  function handleDelete(taskId: string) {
+    const confirmed = window.confirm('Удалить задачу навсегда? Это действие необратимо.');
+    if (!confirmed) {
+      return;
+    }
+    onDelete(taskId);
+  }
+
   if (tasks.length === 0) {
     return <div className="empty-state">Архив пока пуст. Закрытые задачи появятся здесь.</div>;
   }
@@ -49,7 +57,7 @@ function ArchiveList({ tasks, categories, onRestore, onDelete }: ArchiveListProp
               <button type="button" className="button button--secondary" onClick={() => onRestore(task.id)}>
                 Вернуть
               </button>
-              <button type="button" className="button button--danger" onClick={() => onDelete(task.id)}>
+              <button type="button" className="button button--danger" onClick={() => handleDelete(task.id)}>
                 Удалить
               </button>
             </div>
