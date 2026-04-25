@@ -1,3 +1,4 @@
+import { useMemo } from 'react';
 import type { Category, Task } from '../types';
 import { formatDateTime } from '../utils/dates';
 import { getUrgency } from '../utils/urgency';
@@ -15,10 +16,11 @@ interface ArchiveListProps {
 }
 
 function ArchiveList({ tasks, categories, onRestore, onDelete }: ArchiveListProps) {
-  const categoryLabels = Object.fromEntries(categories.map((category) => [category.key, category.label])) as Record<
-    Category,
-    string
-  >;
+  const categoryLabels = useMemo(
+    () =>
+      Object.fromEntries(categories.map((category) => [category.key, category.label])) as Record<Category, string>,
+    [categories],
+  );
 
   function handleDelete(taskId: string) {
     const confirmed = window.confirm('Удалить задачу навсегда? Это действие необратимо.');

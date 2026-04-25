@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ApiError,
   createBackupSnapshot,
@@ -12,10 +12,11 @@ import {
 import { stripAppBasePath, withAppBasePath } from './basePath';
 import ArchiveList from './components/ArchiveList';
 import CategorySection from './components/CategorySection';
-import CreateTaskModal from './components/CreateTaskModal';
 import Header from './components/Header';
 import LoginScreen from './components/LoginScreen';
-import TaskDetailsModal from './components/TaskDetailsModal';
+
+const CreateTaskModal = lazy(() => import('./components/CreateTaskModal'));
+const TaskDetailsModal = lazy(() => import('./components/TaskDetailsModal'));
 import { loadLocalState, sanitizeTasks, saveLocalState, serializeTasks } from './storage';
 import type {
   BackupSnapshotResponse,
@@ -504,9 +505,11 @@ function App() {
     }
   }
 
-  backupRunnerRef.current = (source: BackupSource) => {
-    void runBackup(source);
-  };
+  useEffect(() => {
+    backupRunnerRef.current = (source: BackupSource) => {
+      void runBackup(source);
+    };
+  });
 
   useEffect(() => {
     const intervalId = window.setInterval(() => {
@@ -678,10 +681,24 @@ function App() {
     }
   }
 
-  const openTasks = tasks.filter((task) => task.status === 'open');
-  const archiveTasks = [...tasks]
-    .filter((task) => task.status === 'closed')
-    .sort((left, right) => (right.closedAt ?? '').localeCompare(left.closedAt ?? ''));
+  const openTasks = useMemo(() => tasks.filter((task) => task.status === 'open'), [tasks]);
+  const archiveTasks = useMemo(
+    () =>
+      tasks
+        .filter((task) => task.status === 'closed')
+        .sort((left, right) => (right.closedAt ?? '').localeCompare(left.closedAt ?? '')),
+    [tasks],
+  );
+  const tasksByCategory = useMemo(() => {
+    const grouped: Record<Category, Task[]> = { passion: [], routine: [], body: [], projects: [] };
+    for (const task of openTasks) {
+      grouped[task.category].push(task);
+    }
+    for (const key of Object.keys(grouped) as Category[]) {
+      grouped[key].sort((left, right) => left.createdAt.localeCompare(right.createdAt));
+    }
+    return grouped;
+  }, [openTasks]);
   const selectedTask =
     tasks.find((task) => task.id === selectedTaskId && task.status === 'open') ?? null;
   const draggedTask =
@@ -881,9 +898,7 @@ function App() {
           <main className="screen">
             <div className="sections">
               {CATEGORIES.map((category) => {
-                const tasksForCategory = openTasks
-                  .filter((task) => task.category === category.key)
-                  .sort((left, right) => left.createdAt.localeCompare(right.createdAt));
+                const tasksForCategory = tasksByCategory[category.key];
 
                 return (
                   <CategorySection
@@ -926,22 +941,30 @@ function App() {
         )}
       </div>
 
-      <TaskDetailsModal
-        task={selectedTask}
-        categories={CATEGORIES}
-        onArchive={archiveTask}
-        onClose={() => setSelectedTaskId(null)}
-        onDelete={deleteTask}
-        onSave={updateTask}
-      />
+      {selectedTask && (
+        <Suspense fallback={null}>
+          <TaskDetailsModal
+            task={selectedTask}
+            categories={CATEGORIES}
+            onArchive={archiveTask}
+            onClose={() => setSelectedTaskId(null)}
+            onDelete={deleteTask}
+            onSave={updateTask}
+          />
+        </Suspense>
+      )}
 
-      <CreateTaskModal
-        isOpen={isCreateModalOpen}
-        categories={CATEGORIES}
-        defaultCategory="passion"
-        onClose={() => setCreateModalOpen(false)}
-        onCreate={createTask}
-      />
+      {isCreateModalOpen && (
+        <Suspense fallback={null}>
+          <CreateTaskModal
+            isOpen={isCreateModalOpen}
+            categories={CATEGORIES}
+            defaultCategory="passion"
+            onClose={() => setCreateModalOpen(false)}
+            onCreate={createTask}
+          />
+        </Suspense>
+      )}
     </div>
   );
 }

@@ -44,7 +44,12 @@ function Header({
     <header className="header">
       <div className="header__brand">
         <h1 className="header__title">MONDAY</h1>
-        <span className="sync-status has-tooltip has-tooltip--start" data-tooltip={syncTooltip}>
+        <span
+          className="sync-status has-tooltip has-tooltip--start"
+          data-tooltip={syncTooltip}
+          role="status"
+          aria-live="polite"
+        >
           <button
             type="button"
             className={`sync-status__dot sync-status__dot--${syncStatus}`}
@@ -54,8 +59,8 @@ function Header({
             disabled={isBackuping}
             onClick={onBackup}
           />
-          <span className="sync-status__label" aria-label={syncTooltip}>
-            {syncLabel}
+          <span className="sr-only">
+            {syncLabel}. {syncTooltip}
           </span>
         </span>
         {identityLabel && <span className="header__identity">{identityLabel}</span>}
