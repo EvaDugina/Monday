@@ -36,7 +36,7 @@ function TaskItem({
     onDragStart?.();
   }
 
-  function handleActivationKey(event: React.KeyboardEvent<HTMLDivElement>) {
+  function handleActivationKey(event: React.KeyboardEvent) {
     if (isClosing) return;
     if (event.key === 'Enter' || event.key === ' ') {
       event.preventDefault();
@@ -48,6 +48,12 @@ function TaskItem({
     <article
       className={`task-card${isDragging ? ' task-card--dragging' : ''}${isClosing ? ' task-card--closing' : ''}`}
       data-category={task.category}
+      role="button"
+      tabIndex={isClosing ? -1 : 0}
+      aria-disabled={isClosing || undefined}
+      aria-label={`Открыть задачу: ${task.title}`}
+      onClick={isClosing ? undefined : onOpen}
+      onKeyDown={handleActivationKey}
     >
       {onQuickClose && (
         <button
@@ -55,44 +61,19 @@ function TaskItem({
           role="checkbox"
           aria-checked="false"
           className="task-card__checkbox"
-          onClick={onQuickClose}
+          onClick={(event) => {
+            event.stopPropagation();
+            onQuickClose();
+          }}
           aria-label="Закрыть задачу"
           title="Закрыть задачу"
           disabled={isClosing}
         />
       )}
 
-      <div
-        className="task-card__main"
-        role="button"
-        tabIndex={isClosing ? -1 : 0}
-        aria-disabled={isClosing || undefined}
-        onClick={isClosing ? undefined : onOpen}
-        onKeyDown={handleActivationKey}
-      >
-        <div className="task-card__headline">
-          {task.urgent && <span className="task-card__urgent-badge">СРОЧНО</span>}
-          <span className="task-card__title">{task.title}</span>
-        </div>
-
-        {task.description && <p className="task-card__description">{task.description}</p>}
-
-        {urgency.label && (
-          <div className="task-card__meta">
-            {urgency.tone === 'recurring' && (
-              <RotateCw className="task-card__meta-icon" size={13} strokeWidth={1.75} aria-hidden="true" />
-            )}
-            {(urgency.tone === 'urgent' || urgency.tone === 'soon') && (
-              <span
-                className={`task-card__meta-dot task-card__meta-dot--${urgency.tone}`}
-                aria-hidden="true"
-              />
-            )}
-            <span className={`task-card__deadline task-card__deadline--${urgency.tone}`}>
-              {urgency.label}
-            </span>
-          </div>
-        )}
+      <div className="task-card__headline">
+        {task.urgent && <span className="task-card__urgent-badge">СРОЧНО</span>}
+        <span className="task-card__title">{task.title}</span>
       </div>
 
       <div
@@ -106,11 +87,36 @@ function TaskItem({
         data-dragging={isDragging || undefined}
         onDragStart={handleDragStart}
         onDragEnd={onDragEnd}
-        onClick={isClosing ? undefined : onOpen}
-        onKeyDown={handleActivationKey}
+        onClick={(event) => {
+          event.stopPropagation();
+          if (!isClosing) onOpen();
+        }}
+        onKeyDown={(event) => {
+          event.stopPropagation();
+          handleActivationKey(event);
+        }}
       >
         <GripVertical size={15} strokeWidth={1.75} aria-hidden="true" />
       </div>
+
+      {task.description && <p className="task-card__description">{task.description}</p>}
+
+      {urgency.label && (
+        <div className="task-card__meta">
+          {urgency.tone === 'recurring' && (
+            <RotateCw className="task-card__meta-icon" size={13} strokeWidth={1.75} aria-hidden="true" />
+          )}
+          {(urgency.tone === 'urgent' || urgency.tone === 'soon') && (
+            <span
+              className={`task-card__meta-dot task-card__meta-dot--${urgency.tone}`}
+              aria-hidden="true"
+            />
+          )}
+          <span className={`task-card__deadline task-card__deadline--${urgency.tone}`}>
+            {urgency.label}
+          </span>
+        </div>
+      )}
     </article>
   );
 }

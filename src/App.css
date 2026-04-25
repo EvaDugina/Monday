@@ -530,12 +530,42 @@ button:disabled {
 .task-card {
   display: grid;
   grid-template-columns: 22px 1fr 20px;
+  grid-template-areas:
+    'check headline grip'
+    '.     desc     .'
+    '.     meta     .';
   align-items: start;
   gap: 6px;
   padding: 4px 6px;
   border-radius: 4px;
+  position: relative;
+  cursor: pointer;
   touch-action: manipulation;
   transform-origin: left center;
+}
+
+.task-card[aria-disabled='true'] {
+  cursor: default;
+}
+
+.task-card__checkbox {
+  grid-area: check;
+}
+
+.task-card__headline {
+  grid-area: headline;
+}
+
+.task-card__drag-handle {
+  grid-area: grip;
+}
+
+.task-card__description {
+  grid-area: desc;
+}
+
+.task-card__meta {
+  grid-area: meta;
 }
 
 .task-card--dragging {
@@ -615,40 +645,8 @@ button:disabled {
   opacity: 0.62;
 }
 
-.task-card__main {
-  min-width: 0;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: inherit;
-  text-align: left;
-  cursor: pointer;
-  position: relative;
-}
-
-.task-card__main[aria-disabled='true'] {
-  cursor: default;
-}
-
-.task-card__main::after {
-  content: '';
-  position: absolute;
-  left: 0;
-  top: 0.95rem;
-  width: 100%;
-  height: 1.5px;
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--text) 55%, transparent);
-  opacity: 0;
-  transform: scaleX(0);
-  transform-origin: left center;
-}
-
-.task-card--closing .task-card__main::after {
-  animation: task-card-strike 250ms ease-out forwards;
-}
-
 .task-card__headline {
+  min-width: 0;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -1037,7 +1035,7 @@ button:disabled {
 .button:focus-visible,
 .link-button:focus-visible,
 .chip:focus-visible,
-.task-card__main:focus-visible,
+.task-card:focus-visible,
 .task-card__checkbox:focus-visible,
 .task-card__drag-handle:focus-visible {
   outline: none;
@@ -1145,7 +1143,7 @@ button:disabled {
 
 @media (max-width: 640px) {
   .app {
-    padding: max(24px, env(safe-area-inset-top, 0px)) 16px calc(96px + env(safe-area-inset-bottom, 0px));
+    padding: max(24px, env(safe-area-inset-top, 0px)) 16px calc(48px + env(safe-area-inset-bottom, 0px));
   }
 
   .auth-shell {
@@ -1213,7 +1211,11 @@ button:disabled {
     min-height: 44px;
     margin-top: 0;
     border-radius: 8px;
-    align-self: start;
+    align-self: center;
+  }
+
+  .task-card__headline {
+    align-self: center;
   }
 
   .task-card__checkbox {
@@ -1226,9 +1228,9 @@ button:disabled {
   .task-card__checkbox::before {
     content: '';
     position: absolute;
-    top: 10px;
+    top: 50%;
     left: 50%;
-    transform: translateX(-50%);
+    transform: translate(-50%, -50%);
     width: 20px;
     height: 20px;
     border: 1.5px solid rgba(55, 53, 47, 0.32);
@@ -1237,11 +1239,6 @@ button:disabled {
     transition:
       border-color 120ms ease,
       background 120ms ease;
-  }
-
-  .task-card__drag-handle {
-    align-items: flex-start;
-    padding-top: 12px;
   }
 
   .task-card--closing .task-card__checkbox {
@@ -1267,14 +1264,6 @@ button:disabled {
       background: var(--hover);
       border-color: rgba(55, 53, 47, 0.5);
     }
-  }
-
-  .task-card__main {
-    padding-block: 8px;
-  }
-
-  .task-card__main::after {
-    top: 1.4rem;
   }
 
   .task-card__title {
