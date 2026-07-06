@@ -6,7 +6,7 @@
 - Владелец: команда проекта
 - Последнее обновление: 2026-07-06
 - Стадия проекта: `POC B`
-- Версия проекта: `v0.1.17`
+- Версия проекта: `v0.1.21`
 - Предыдущая версия: `не применимо`
 - Следующий целевой этап: `MVP A`
 - Архив финальной версии предыдущего этапа: `не применимо, каноническая пара документов вводится впервые`
@@ -99,7 +99,7 @@
 - Caddy как reverse proxy в production
 - Authentik + PostgreSQL как внешний auth-layer
 - Open-Meteo Forecast API как внешний клиентский источник погоды без API-ключа
-- Yandex Weather static light SVG icons как внешний источник погодных иконок
+- локальные Yandex Weather light SVG icons в `public/weather-icons`
 
 ### 3.2. Основные модули и их ответственность
 
@@ -149,7 +149,7 @@
   - клиент сжимает изображения для локального хранения, кроме GIF
   - настройки пишутся в `localStorage` отдельно от task snapshot
   - слой фона рендерится за доской как page-sized слой и прокручивается вместе со страницей без parallax-offset от pointer
-  - отдельная floating-панель вне `app__inner` включает background edit-mode и очистку фона
+  - отдельная floating-панель вне `app__inner` включает background edit-mode
   - в background edit-mode кнопка редактирования заменяется кнопкой сохранения изменений и выхода
   - отдельный edit-mode поднимает слой над доской, включает pointer-drag изображений, edge/corner resize handles и кнопки удаления в правом верхнем углу самой картинки
   - новые координаты и размер сохраняются в `localStorage` после завершения pointer-drag, resize или при явном выходе из edit-mode
@@ -163,7 +163,7 @@
   - координаты города берутся из клиентского списка, без Open-Meteo Geocoding API
   - клиент напрямую вызывает `https://api.open-meteo.com/v1/forecast` для `current=temperature_2m,weather_code,is_day,precipitation,rain,showers`
   - `weather_code` и `is_day` мапятся на коды Yandex Weather icon set (`skc_d`, `bkn_ra_n`, `ovc_ts` и т.п.)
-  - итоговая иконка загружается как SVG из `https://yastatic.net/weather/i/icons/funky/light/{iconCode}.svg`
+  - итоговая иконка загружается как локальный SVG из `public/weather-icons/{iconCode}.svg` через `withAppBasePath`
   - rain-layer включается, если `rain`, `showers` или `precipitation` больше нуля либо WMO `weather_code` относится к drizzle/rain/showers/thunderstorm
   - ошибки погоды не блокируют доску и отображаются только как fallback в weather badge
 - Hosted auth:
@@ -291,8 +291,8 @@
 - `PUT /api/tasks` использует optimistic concurrency и не делает merge при несовпадении версии
 - backup снимок не дублируется, если последняя сохраненная версия для пользователя уже совпадает с текущей
 - фоновые декорации не являются частью API-контракта и не должны попадать в `PUT /api/tasks`
-- погодный виджет не является частью API MONDAY; внешние forecast-запросы идут из браузера напрямую в Open-Meteo, а SVG-иконки загружаются с Yandex static host
-- hosted CSP должен разрешать `connect-src https://api.open-meteo.com` и `img-src https://yastatic.net`, иначе weather badge уходит в fallback
+- погодный виджет не является частью API MONDAY; внешние forecast-запросы идут из браузера напрямую в Open-Meteo, а SVG-иконки отдаются как локальные static assets приложения
+- hosted CSP должен разрешать `connect-src https://api.open-meteo.com`; погодные SVG остаются в `img-src 'self'`
 
 ## 6. Окружения и конфигурация
 
@@ -374,7 +374,7 @@
 ### 8.2. Ручная проверка
 
 - локальный сценарий доски: создание, редактирование, перемещение, архив, восстановление
-- локальная персонализация фона: file drag&drop, page-sized scroll layer, floating-toolbar вне `app__inner`, насыщенный рендер изображений, hover-акцент, edit-mode drag, resize, удаление, прозрачные glass-подложки категорий, очистка
+- локальная персонализация фона: file drag&drop, page-sized scroll layer, floating-toolbar вне `app__inner`, насыщенный рендер изображений, hover-акцент, edit-mode drag, resize, удаление, прозрачные glass-подложки категорий
 - сценарий синхронизации: проверка статусов `syncing`, `offline`, `conflict`
 - сценарий backup: ручной запуск и повторный вызов без новой версии
 - hosted-сценарий: auth redirect и smoke path
@@ -465,7 +465,6 @@
   - удалить одно изображение кнопкой в правом верхнем углу самой картинки
   - прокрутить страницу и убедиться, что фоновые изображения прокручиваются вместе с ней и не получают parallax-смещения от движения указателя
   - убедиться, что все видимые категории имеют прозрачную liquid glass-подложку и текст читается поверх загруженных изображений
-  - очистить фон кнопкой во floating-панели
   - перетащить задачу в другую категорию
   - убедиться, что цветовые акценты задачи сменились на цвет новой категории без box-shadow у самой task-card
   - нажать кнопку архива у категории и подтвердить перенос категории с задачами в архив
@@ -621,9 +620,9 @@
 - Контекст:
   - пользователю нужна температура дня в отдельном floating badge, но проект не должен добавлять серверные секреты или усложнять API ради вспомогательного UI-виджета.
 - Решение:
-  - использовать Open-Meteo Forecast напрямую из браузера: координаты брать из локального списка городов, forecast `current=temperature_2m,weather_code,is_day,precipitation,rain,showers` использовать для температуры, Yandex light-иконки и rain-overlay; выбранный город хранить в `localStorage`.
+  - использовать Open-Meteo Forecast напрямую из браузера: координаты брать из локального списка городов, forecast `current=temperature_2m,weather_code,is_day,precipitation,rain,showers` использовать для температуры, локальной Yandex light-иконки и rain-overlay; выбранный город хранить в `localStorage`.
 - Последствия:
-  - сервер MONDAY, SQLite snapshot и backup не меняются; доступность погоды, weather icon и rain-overlay зависят от внешних клиентских запросов и сети.
+  - сервер MONDAY, SQLite snapshot и backup не меняются; доступность погодных данных и rain-overlay зависит от внешнего Open-Meteo, а weather icons остаются локальными static assets.
 - Связанные планы и требования:
   - `REQ-010`
 
@@ -649,3 +648,7 @@
 - `2026-07-06 | v0.1.15 | тип: UX+integration | важность: важно в документации | WeatherBadge использует Yandex Weather light SVG icons: WMO weather_code и Open-Meteo is_day мапятся на Yandex iconCode`
 - `2026-07-06 | v0.1.16 | тип: UX+integration | важность: важно в документации | production CSP разрешает Open-Meteo и Yandex SVG, city select стилизован, добавлен Тбилиси, background resize хранит width/height`
 - `2026-07-06 | v0.1.17 | тип: UX | важность: важно в документации | TaskItem больше не рендерит inline title input и category-chip button; title cluster открывает edit-modal, title в edit-modal read-only, title shell расширен до 90% строки`
+- `2026-07-06 | v0.1.18 | тип: UX | важность: важно в документации | background clear action удалён из floating toolbar`
+- `2026-07-06 | v0.1.19 | тип: UX+assets | важность: важно в документации | WeatherBadge загружает SVG-иконки из public/weather-icons через app base path, production CSP больше не разрешает внешний image-host Yandex`
+- `2026-07-06 | v0.1.20 | тип: UX+assets | важность: важно в документации | добавлен AppleEmojiText и локальный public/emoji/apple/1f30a.png для одинакового отображения 🌊 без системного Apple Color Emoji`
+- `2026-07-06 | v0.1.21 | тип: UX+assets | важность: важно в документации | AppleEmojiText, public/emoji/apple, emoji font stack и countryEmoji в WeatherBadge удалены`

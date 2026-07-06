@@ -1,5 +1,5 @@
 import { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react';
-import { Check, ImageOff, Palette, Save } from 'lucide-react';
+import { Check, Palette, Save } from 'lucide-react';
 import {
   ApiError,
   createBackupSnapshot,
@@ -382,7 +382,6 @@ function App() {
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [toast, setToast] = useState<ToastState | null>(null);
   const [isInitialLoading, setIsInitialLoading] = useState(true);
-  const [isHeaderHidden, setIsHeaderHidden] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [backgroundDecorations, setBackgroundDecorations] = useState<BackgroundDecoration[]>(() =>
     loadBackgroundDecorations(),
@@ -470,17 +469,6 @@ function App() {
     setToast({
       id: Date.now(),
       message: nextDecorations.length === 1 ? 'Изображение добавлено на фон' : 'Изображения добавлены на фон',
-    });
-  }
-
-  function clearBackgroundDecorations(): void {
-    saveBackgroundDecorations([]);
-    backgroundDecorationsRef.current = [];
-    setBackgroundDecorations([]);
-    setIsBackgroundEditMode(false);
-    setToast({
-      id: Date.now(),
-      message: 'Фон очищен',
     });
   }
 
@@ -980,36 +968,6 @@ function App() {
     }, AUTO_BACKUP_INTERVAL_MS);
 
     return () => window.clearInterval(intervalId);
-  }, []);
-
-  useEffect(() => {
-    let frame: number | null = null;
-    let lastY = window.scrollY;
-
-    function handleScroll() {
-      if (frame !== null) return;
-      frame = window.requestAnimationFrame(() => {
-        const currentY = window.scrollY;
-        const delta = currentY - lastY;
-
-        if (currentY > 80 && delta > 4) {
-          setIsHeaderHidden(true);
-        } else if (delta < -4 || currentY < 16) {
-          setIsHeaderHidden(false);
-        }
-
-        lastY = currentY;
-        frame = null;
-      });
-    }
-
-    window.addEventListener('scroll', handleScroll, { passive: true });
-    return () => {
-      window.removeEventListener('scroll', handleScroll);
-      if (frame !== null) {
-        window.cancelAnimationFrame(frame);
-      }
-    };
   }, []);
 
   useEffect(() => {
@@ -1724,18 +1682,6 @@ function App() {
                   : 'Редактировать фон'}
             </span>
           </button>
-          {isBackgroundEditMode && (
-            <button
-              type="button"
-              className="icon-button background-toolbar__button has-tooltip has-tooltip--end"
-              data-tooltip="Очистить фон"
-              title="Очистить фон"
-              onClick={clearBackgroundDecorations}
-            >
-              <ImageOff size={18} strokeWidth={1.9} aria-hidden="true" />
-              <span className="sr-only">Очистить фон</span>
-            </button>
-          )}
         </aside>
       )}
       <div className="app__inner">
@@ -1744,7 +1690,6 @@ function App() {
           screen={screen}
           currentUser={currentUser}
           isBackuping={isBackuping}
-          isCollapsed={isHeaderHidden}
           isLoggingOut={isLoggingOut}
           syncStatus={syncStatus}
           syncTooltip={syncTooltip}

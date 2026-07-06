@@ -347,7 +347,7 @@
 
 .header {
   position: sticky;
-  top: 12px;
+  top: max(12px, env(safe-area-inset-top, 0px));
   z-index: 6;
   display: flex;
   align-items: baseline;
@@ -369,15 +369,7 @@
   transition:
     border-color 120ms ease,
     background 120ms ease,
-    box-shadow 120ms ease,
-    transform 220ms ease,
-    opacity 220ms ease;
-}
-
-.header--collapsed {
-  transform: translateY(-110%);
-  opacity: 0;
-  pointer-events: none;
+    box-shadow 120ms ease;
 }
 
 .header__brand {
@@ -474,7 +466,7 @@
 
 .weather-badge__city-select {
   appearance: none;
-  width: min(148px, 32vw);
+  width: min(176px, 42vw);
   min-width: 0;
   padding: 5px 24px 5px 9px;
   border: 1px solid color-mix(in srgb, rgba(255, 255, 255, 0.54) 72%, var(--text) 10%);
@@ -1506,16 +1498,6 @@ button:disabled {
   font-size: 0.92rem;
 }
 
-.empty-state__hint-touch {
-  display: none;
-}
-
-@media (hover: none) {
-  .empty-state__hint-touch {
-    display: inline;
-  }
-}
-
 /* Modal */
 
 .modal-overlay {
@@ -1630,13 +1612,8 @@ button:disabled {
   min-height: 100px;
 }
 
-.task-card__title,
 .task-card__description,
-.task-card__title-shell--tooltip::after,
-.task-details__title,
-.archive-item__content h3,
 .archive-item__description,
-.archive-category__task,
 .text-input {
   font-family: var(--app-font-family);
 }

@@ -5,7 +5,6 @@ interface HeaderProps {
   screen: Screen;
   currentUser: CurrentUser | null;
   isBackuping: boolean;
-  isCollapsed?: boolean;
   isLoggingOut?: boolean;
   syncStatus: SyncStatus;
   syncTooltip: string;
@@ -20,7 +19,6 @@ function Header({
   screen,
   currentUser,
   isBackuping,
-  isCollapsed = false,
   isLoggingOut = false,
   syncStatus,
   syncTooltip,
@@ -42,7 +40,7 @@ function Header({
             : 'Оффлайн';
 
   return (
-    <header className={`header${isCollapsed ? ' header--collapsed' : ''}`}>
+    <header className="header">
       <div className="header__brand">
         <h1 className="header__title">MONDAY</h1>
         <span

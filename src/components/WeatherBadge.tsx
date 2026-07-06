@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
+import { withAppBasePath } from '../basePath';
 
 const WEATHER_CITY_STORAGE_KEY = 'monday:weather-city';
 const DEFAULT_CITY_ID = 'moscow';
-const YANDEX_WEATHER_ICON_BASE_URL = 'https://yastatic.net/weather/i/icons/funky/light';
+const WEATHER_ICON_BASE_PATH = '/weather-icons';
 
 interface WeatherCityOption {
   id: string;
@@ -114,8 +115,8 @@ function withDayNight(iconCode: string, isDay: boolean | null): string {
   return `${iconCode}_${getDayNightSuffix(isDay)}`;
 }
 
-function getYandexWeatherIconUrl(iconCode: string): string {
-  return `${YANDEX_WEATHER_ICON_BASE_URL}/${iconCode}.svg`;
+function getWeatherIconUrl(iconCode: string): string {
+  return withAppBasePath(`${WEATHER_ICON_BASE_PATH}/${iconCode}.svg`);
 }
 
 function getWeatherVisual(
@@ -277,7 +278,7 @@ function WeatherBadge({ onRainChange }: WeatherBadgeProps) {
     >
       <img
         className="weather-badge__icon"
-        src={getYandexWeatherIconUrl(weatherVisual.iconCode)}
+        src={getWeatherIconUrl(weatherVisual.iconCode)}
         alt=""
         aria-hidden="true"
         draggable={false}

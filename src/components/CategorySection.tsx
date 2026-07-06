@@ -271,13 +271,7 @@ function CategorySection({
             <TaskCardSkeleton width="medium" />
             <TaskCardSkeleton width="short" />
           </>
-        ) : (
-          <div className="empty-state">
-            Пока пусто. Добавьте задачу через поле ниже
-            <span className="empty-state__hint-touch"> или откройте карточку, чтобы выбрать раздел</span>
-            .
-          </div>
-        )}
+        ) : null}
       </div>
 
       <InlineCreator placeholder="Название задачи..." onCreate={onCreate} />
