@@ -1,3 +1,4 @@
+import { Check } from 'lucide-react';
 import { useEffect, useRef } from 'react';
 
 export interface ToastState {
@@ -6,6 +7,7 @@ export interface ToastState {
   actionLabel?: string;
   onAction?: () => void;
   duration?: number;
+  tone?: 'success';
 }
 
 interface ToastProps {
@@ -37,7 +39,17 @@ function Toast({ toast, onDismiss }: ToastProps) {
   }
 
   return (
-    <div className="toast" role="status" aria-live="polite" key={toast.id}>
+    <div
+      className={`toast${toast.tone === 'success' ? ' toast--success' : ''}`}
+      role="status"
+      aria-live="polite"
+      key={toast.id}
+    >
+      {toast.tone === 'success' && (
+        <span className="toast__status-icon" aria-hidden="true">
+          <Check size={14} strokeWidth={2.4} />
+        </span>
+      )}
       <span className="toast__message">{toast.message}</span>
       {toast.actionLabel && toast.onAction && (
         <button

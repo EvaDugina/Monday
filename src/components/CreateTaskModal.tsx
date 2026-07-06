@@ -151,6 +151,11 @@ function CreateTaskModal({
                     style={{ '--category-color': option.color } as CSSProperties}
                     onClick={() => setCategory(option.key)}
                   >
+                    <span
+                      className="chip__dot"
+                      style={{ '--category-color': option.color } as CSSProperties}
+                      aria-hidden="true"
+                    />
                     {option.label}
                   </button>
                 ))}

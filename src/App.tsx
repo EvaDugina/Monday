@@ -1,5 +1,5 @@
 import { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react';
-import { ImageOff, Palette, Save } from 'lucide-react';
+import { Check, ImageOff, Palette, Save } from 'lucide-react';
 import {
   ApiError,
   createBackupSnapshot,
@@ -46,6 +46,7 @@ import {
 import { compareIsoDates } from './utils/dates';
 
 const AUTO_BACKUP_INTERVAL_MS = 5 * 60_000;
+const BACKGROUND_SAVE_CONFIRM_MS = 400;
 const TASK_CLOSE_DELAY_MS = 10_000;
 const DRAG_SCROLL_EDGE_THRESHOLD_PX = 140;
 const DRAG_SCROLL_MAX_STEP_PX = 22;
@@ -360,7 +361,9 @@ function App() {
     loadBackgroundDecorations(),
   );
   const [isBackgroundEditMode, setIsBackgroundEditMode] = useState(false);
+  const [isBackgroundSaveConfirmed, setIsBackgroundSaveConfirmed] = useState(false);
   const [isBackgroundDragActive, setIsBackgroundDragActive] = useState(false);
+  const [isRainyWeather, setIsRainyWeather] = useState(false);
   const latestTasksRef = useRef(tasks);
   const latestCategoriesRef = useRef(categories);
   const backgroundDecorationsRef = useRef(backgroundDecorations);
@@ -372,6 +375,7 @@ function App() {
   const hasInitializedSyncRef = useRef(false);
   const backupInFlightRef = useRef(false);
   const closingTimeoutsRef = useRef<Record<string, number>>({});
+  const backgroundSaveConfirmTimeoutRef = useRef<number | null>(null);
   const dragPointerYRef = useRef<number | null>(null);
   const dragScrollFrameRef = useRef<number | null>(null);
   const backupRunnerRef = useRef<(source: BackupSource) => void>(() => undefined);
@@ -462,6 +466,7 @@ function App() {
       return;
     }
 
+    setIsBackgroundSaveConfirmed(false);
     setIsBackgroundEditMode(true);
   }
 
@@ -482,11 +487,22 @@ function App() {
       return;
     }
 
-    setIsBackgroundEditMode(false);
+    if (backgroundSaveConfirmTimeoutRef.current !== null) {
+      window.clearTimeout(backgroundSaveConfirmTimeoutRef.current);
+    }
+
+    setIsBackgroundSaveConfirmed(true);
     setToast({
       id: Date.now(),
       message: 'Изменения фона сохранены',
+      tone: 'success',
     });
+
+    backgroundSaveConfirmTimeoutRef.current = window.setTimeout(() => {
+      setIsBackgroundEditMode(false);
+      setIsBackgroundSaveConfirmed(false);
+      backgroundSaveConfirmTimeoutRef.current = null;
+    }, BACKGROUND_SAVE_CONFIRM_MS);
   }
 
   function moveBackgroundDecoration(decorationId: string, left: number, top: number): void {
@@ -652,6 +668,10 @@ function App() {
 
       if (dragScrollFrameRef.current !== null) {
         window.cancelAnimationFrame(dragScrollFrameRef.current);
+      }
+
+      if (backgroundSaveConfirmTimeoutRef.current !== null) {
+        window.clearTimeout(backgroundSaveConfirmTimeoutRef.current);
       }
     },
     [],
@@ -1469,7 +1489,7 @@ function App() {
     <div
       className={`app${isBackgroundDragActive ? ' app--background-dragging' : ''}${
         isBackgroundEditMode ? ' app--background-editing' : ''
-      }`}
+      }${isRainyWeather ? ' app--weather-rain' : ''}`}
       onDragEnter={handleBackgroundDragEnter}
       onDragLeave={handleBackgroundDragLeave}
       onDragOver={handleBackgroundDragOver}
@@ -1484,6 +1504,7 @@ function App() {
         onDecorationResize={resizeBackgroundDecoration}
         onDecorationResizeEnd={commitBackgroundDecorationMove}
       />
+      {isRainyWeather && <div className="weather-rain" aria-hidden="true" />}
       {isBackgroundDragActive && <div className="background-drop-hint">Отпустите изображение на фон</div>}
       {backgroundDecorations.length > 0 && (
         <aside className="background-toolbar" aria-label="Управление фоном">
@@ -1491,19 +1512,38 @@ function App() {
             type="button"
             className={`icon-button background-toolbar__button has-tooltip has-tooltip--end${
               isBackgroundEditMode ? ' icon-button--active' : ''
-            }`}
-            data-tooltip={isBackgroundEditMode ? 'Сохранить изменения и выйти' : 'Редактировать фон'}
-            title={isBackgroundEditMode ? 'Сохранить изменения и выйти' : 'Редактировать фон'}
+            }${isBackgroundSaveConfirmed ? ' background-toolbar__button--saved' : ''}`}
+            data-tooltip={
+              isBackgroundSaveConfirmed
+                ? 'Сохранено'
+                : isBackgroundEditMode
+                  ? 'Сохранить изменения и выйти'
+                  : 'Редактировать фон'
+            }
+            title={
+              isBackgroundSaveConfirmed
+                ? 'Сохранено'
+                : isBackgroundEditMode
+                  ? 'Сохранить изменения и выйти'
+                  : 'Редактировать фон'
+            }
             aria-pressed={isBackgroundEditMode}
+            disabled={isBackgroundSaveConfirmed}
             onClick={isBackgroundEditMode ? saveAndExitBackgroundEditMode : startBackgroundEditMode}
           >
-            {isBackgroundEditMode ? (
+            {isBackgroundSaveConfirmed ? (
+              <Check size={18} strokeWidth={2.3} aria-hidden="true" />
+            ) : isBackgroundEditMode ? (
               <Save size={18} strokeWidth={1.9} aria-hidden="true" />
             ) : (
               <Palette size={18} strokeWidth={1.9} aria-hidden="true" />
             )}
             <span className="sr-only">
-              {isBackgroundEditMode ? 'Сохранить изменения и выйти' : 'Редактировать фон'}
+              {isBackgroundSaveConfirmed
+                ? 'Сохранено'
+                : isBackgroundEditMode
+                  ? 'Сохранить изменения и выйти'
+                  : 'Редактировать фон'}
             </span>
           </button>
           {isBackgroundEditMode && (
@@ -1533,6 +1573,7 @@ function App() {
           onBackup={() => backupRunnerRef.current('manual')}
           onCreate={() => setCreateModalOpen(true)}
           onLogout={() => void handleLogout()}
+          onRainChange={setIsRainyWeather}
           onToggleScreen={() => navigateToScreen(screen === 'active' ? 'archive' : 'active')}
         />
 

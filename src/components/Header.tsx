@@ -1,4 +1,5 @@
 import type { CurrentUser, Screen, SyncStatus } from '../types';
+import WeatherBadge from './WeatherBadge';
 
 interface HeaderProps {
   backupTooltip: string;
@@ -10,6 +11,7 @@ interface HeaderProps {
   syncStatus: SyncStatus;
   syncTooltip: string;
   onBackup: () => void;
+  onRainChange?: (isRainy: boolean) => void;
   onLogout?: () => void;
   onToggleScreen: () => void;
   onCreate?: () => void;
@@ -25,6 +27,7 @@ function Header({
   syncStatus,
   syncTooltip,
   onBackup,
+  onRainChange,
   onLogout,
   onToggleScreen,
   onCreate,
@@ -64,6 +67,7 @@ function Header({
             {syncLabel}. {syncTooltip}
           </span>
         </span>
+        <WeatherBadge onRainChange={onRainChange} />
       </div>
 
       <nav className="header__actions">

@@ -6,7 +6,7 @@
 - Владелец: команда проекта
 - Последнее обновление: 2026-07-06
 - Стадия проекта: `POC B`
-- Версия проекта: `v0.1.10`
+- Версия проекта: `v0.1.12`
 - Предыдущая версия: `не применимо`
 - Следующий целевой этап: `MVP A`
 - Архив финальной версии предыдущего этапа: `не применимо, каноническая пара документов вводится впервые`
@@ -73,6 +73,8 @@
 - `CategoryOption`: пользовательская секция доски с устойчивым ключом, названием и цветом.
 - `Deadline`: дедлайн задачи (`none`, `date`, `range`, `recurring`; weekly recurring использует `mode=week` и `weekday`).
 - `BackgroundDecoration`: локальная браузерная настройка фонового изображения с позицией на page-sized background layer и горизонтальным anchor от центра; не входит в серверный snapshot.
+- `WeatherPreference`: локальная браузерная настройка города для погодного виджета header.
+- `WeatherRainLayer`: client-only CSS overlay лёгкого дождя, включаемый погодным виджетом.
 - `ServerTasksState`: серверный снимок доски с `tasks`, `categories`, `updatedAt` и `version`.
 - `task_backups`: таблица резервных снимков с привязкой к пользователю-инициатору.
 - auth headers от reverse proxy: источник текущего identity context для API.
@@ -96,6 +98,7 @@
 - Docker Compose для локального и production-подъема
 - Caddy как reverse proxy в production
 - Authentik + PostgreSQL как внешний auth-layer
+- Open-Meteo Geocoding API и Forecast API как внешний клиентский источник погоды без API-ключа
 
 ### 3.2. Основные модули и их ответственность
 
@@ -142,6 +145,13 @@
   - новые координаты и размер сохраняются в `localStorage` после завершения pointer-drag, resize или при явном выходе из edit-mode
   - горизонтальная координата хранится как pixel offset от центра фонового слоя; старые процентные `left` без `anchor` мигрируются при чтении из `localStorage`
   - секции категорий используют CSS liquid glass-подложку (`backdrop-filter`, прозрачный фон, блики и граница) с минимальной белой заливкой для читаемости поверх фоновых изображений
+- Weather:
+  - header по умолчанию показывает температуру для Москвы
+  - город хранится в `localStorage` по ключу `monday:weather-city`
+  - клик по названию города открывает inline input для смены города
+  - клиент напрямую вызывает `https://geocoding-api.open-meteo.com/v1/search` для координат и `https://api.open-meteo.com/v1/forecast` для `current=temperature_2m,weather_code,precipitation,rain,showers`
+  - rain-layer включается, если `rain`, `showers` или `precipitation` больше нуля либо WMO `weather_code` относится к drizzle/rain/showers/thunderstorm
+  - ошибки погоды не блокируют доску и отображаются только как fallback в weather badge
 - Hosted auth:
   - reverse proxy передает identity headers
   - API извлекает auth context из заголовков
@@ -230,6 +240,9 @@
   - `top` остается процентной координатой изображения внутри page-sized background layer
   - `width` меняется через resize-handle фонового изображения в background edit-mode
   - ограничивается шестью изображениями и не сериализуется в `tasks_json`
+- frontend `WeatherPreference`:
+  - выбранный город хранится в `localStorage` по ключу `monday:weather-city`
+  - значение не сериализуется в `tasks_json` и не попадает в backup
 - `LocalStateSnapshot`:
   - локальные `tasks`, `categories`, `version`, `updatedAt`
 - SQLite tables:
@@ -262,6 +275,7 @@
 - `PUT /api/tasks` использует optimistic concurrency и не делает merge при несовпадении версии
 - backup снимок не дублируется, если последняя сохраненная версия для пользователя уже совпадает с текущей
 - фоновые декорации не являются частью API-контракта и не должны попадать в `PUT /api/tasks`
+- погодный виджет не является частью API MONDAY; внешние запросы идут из браузера напрямую в Open-Meteo
 
 ## 6. Окружения и конфигурация
 
@@ -578,6 +592,18 @@
 - Связанные планы и требования:
   - `REQ-001`, `REQ-004`, `TD-001`
 
+### TD-007. Погода как client-only интеграция
+
+- Статус: approved
+- Контекст:
+  - пользователю нужна температура дня в header, но проект не должен добавлять серверные секреты или усложнять API ради вспомогательного UI-виджета.
+- Решение:
+  - использовать Open-Meteo напрямую из браузера: geocoding для города и forecast `current=temperature_2m` для температуры; выбранный город хранить в `localStorage`.
+- Последствия:
+  - сервер MONDAY, SQLite snapshot и backup не меняются; доступность погоды и rain-overlay зависят от внешнего API и клиентской сети.
+- Связанные планы и требования:
+  - `REQ-010`
+
 ## 14. История изменений документа
 
 - История ниже ведется только в рамках текущего этапа.
@@ -593,3 +619,5 @@
 - `2026-07-06 | v0.1.8 | тип: UX | важность: важно в документации | background edit action заменяется на save-and-exit, left-координата фоновых изображений хранится как offset от центра с миграцией legacy процентов`
 - `2026-07-06 | v0.1.9 | тип: UX | важность: важно в документации | task row badges унифицированы для срочности, закрепления, дедлайнов и повторов без изменения snapshot/API`
 - `2026-07-06 | v0.1.10 | тип: UX+data | важность: важно в документации | категории перенесены в board snapshot: добавление секций, inline-переименование и смена цвета синхронизируются через existing optimistic concurrency`
+- `2026-07-06 | v0.1.11 | тип: UX+integration | важность: важно в документации | header получил client-only weather badge с Open-Meteo, локальным выбором города и fallback при ошибке внешнего API`
+- `2026-07-06 | v0.1.12 | тип: UX | важность: важно в документации | WeatherBadge стал отдавать rain state в App и включает лёгкий CSS rain-layer при дождливых current conditions`
