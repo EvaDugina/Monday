@@ -38,6 +38,7 @@ export interface ApiTask {
   category: 'passion' | 'routine' | 'body' | 'projects';
   deadline: ApiDeadline;
   urgent: boolean;
+  pinned?: boolean;
   status: 'open' | 'closed';
   createdAt: string;
   closedAt?: string;
@@ -191,6 +192,10 @@ function parseTask(value: unknown, index: number): ApiTask {
     status: status as ApiTask['status'],
     createdAt: expectIsoDateString(record.createdAt, `tasks[${index}].createdAt`),
   };
+
+  if (record.pinned !== undefined && record.pinned !== false) {
+    parsedTask.pinned = expectBoolean(record.pinned, `tasks[${index}].pinned`);
+  }
 
   if (closedAt !== undefined) {
     parsedTask.closedAt = expectIsoDateString(closedAt, `tasks[${index}].closedAt`);

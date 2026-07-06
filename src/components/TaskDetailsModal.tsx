@@ -1,17 +1,11 @@
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { useModalFocusTrap } from '../hooks/useModalFocusTrap';
-import type { Category, Deadline, Task } from '../types';
+import type { Deadline, Task } from '../types';
 import { MAX_DESCRIPTION_LENGTH, MAX_TITLE_LENGTH } from '../types';
 import DeadlineEditor from './DeadlineEditor';
 
-interface CategoryOption {
-  key: Category;
-  label: string;
-}
-
 interface TaskDetailsModalProps {
   task: Task | null;
-  categories: CategoryOption[];
   onClose: () => void;
   onSave: (task: Task) => void;
   onArchive: (taskId: string) => void;
@@ -21,18 +15,18 @@ interface TaskDetailsModalProps {
 interface Snapshot {
   title: string;
   description: string;
-  category: Category;
   deadline: Deadline;
   urgent: boolean;
+  pinned: boolean;
 }
 
 function takeSnapshot(task: Task): Snapshot {
   return {
     title: task.title,
     description: task.description,
-    category: task.category,
     deadline: task.deadline,
     urgent: task.urgent,
+    pinned: task.pinned ?? false,
   };
 }
 
@@ -40,18 +34,18 @@ function isDirty(snapshot: Snapshot, current: Snapshot): boolean {
   return (
     snapshot.title.trim() !== current.title.trim() ||
     snapshot.description.trim() !== current.description.trim() ||
-    snapshot.category !== current.category ||
     snapshot.urgent !== current.urgent ||
+    snapshot.pinned !== current.pinned ||
     JSON.stringify(snapshot.deadline) !== JSON.stringify(current.deadline)
   );
 }
 
-function TaskDetailsModal({ task, categories, onClose, onSave, onArchive, onDelete }: TaskDetailsModalProps) {
+function TaskDetailsModal({ task, onClose, onSave, onArchive, onDelete }: TaskDetailsModalProps) {
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
-  const [category, setCategory] = useState<Category>('passion');
   const [deadline, setDeadline] = useState<Deadline>({ kind: 'none' });
   const [urgent, setUrgent] = useState(false);
+  const [pinned, setPinned] = useState(false);
   const titleId = useId();
   const modalRef = useModalFocusTrap(task !== null);
   const initialSnapshotRef = useRef<Snapshot | null>(null);
@@ -64,9 +58,9 @@ function TaskDetailsModal({ task, categories, onClose, onSave, onArchive, onDele
 
     setTitle(task.title);
     setDescription(task.description);
-    setCategory(task.category);
     setDeadline(task.deadline);
     setUrgent(task.urgent);
+    setPinned(task.pinned ?? false);
     initialSnapshotRef.current = takeSnapshot(task);
   }, [task]);
 
@@ -74,7 +68,7 @@ function TaskDetailsModal({ task, categories, onClose, onSave, onArchive, onDele
     const snapshot = initialSnapshotRef.current;
 
     if (snapshot) {
-      const current: Snapshot = { title, description, category, deadline, urgent };
+      const current: Snapshot = { title, description, deadline, urgent, pinned };
 
       if (isDirty(snapshot, current)) {
         const shouldDiscard = window.confirm('Закрыть без сохранения изменений?');
@@ -85,7 +79,7 @@ function TaskDetailsModal({ task, categories, onClose, onSave, onArchive, onDele
     }
 
     onClose();
-  }, [title, description, category, deadline, urgent, onClose]);
+  }, [title, description, deadline, urgent, pinned, onClose]);
 
   useEffect(() => {
     if (!task) {
@@ -119,9 +113,9 @@ function TaskDetailsModal({ task, categories, onClose, onSave, onArchive, onDele
       ...currentTask,
       title: trimmedTitle,
       description: description.trim(),
-      category,
       deadline,
       urgent,
+      pinned: pinned || undefined,
     });
     onClose();
   }
@@ -156,14 +150,24 @@ function TaskDetailsModal({ task, categories, onClose, onSave, onArchive, onDele
           <div className="form-field">
             <div className="form-field__header">
               <span className="form-label">Название</span>
-              <button
-                type="button"
-                className={`toggle-badge${urgent ? ' toggle-badge--active' : ''}`}
-                aria-pressed={urgent}
-                onClick={() => setUrgent((current) => !current)}
-              >
-                срочно
-              </button>
+              <div className="form-field__badges">
+                <button
+                  type="button"
+                  className={`toggle-badge toggle-badge--pin${pinned ? ' toggle-badge--active' : ''}`}
+                  aria-pressed={pinned}
+                  onClick={() => setPinned((current) => !current)}
+                >
+                  закрепить
+                </button>
+                <button
+                  type="button"
+                  className={`toggle-badge${urgent ? ' toggle-badge--active' : ''}`}
+                  aria-pressed={urgent}
+                  onClick={() => setUrgent((current) => !current)}
+                >
+                  срочно
+                </button>
+              </div>
             </div>
             <input
               className="text-input"
@@ -184,23 +188,6 @@ function TaskDetailsModal({ task, categories, onClose, onSave, onArchive, onDele
               onChange={(event) => setDescription(event.target.value)}
             />
           </label>
-
-          <div className="form-field">
-            <span className="form-label">Категория</span>
-            <div className="category-picker">
-              {categories.map((option) => (
-                <button
-                  key={option.key}
-                  type="button"
-                  className={`chip${category === option.key ? ' chip--active' : ''}`}
-                  data-category={option.key}
-                  onClick={() => setCategory(option.key)}
-                >
-                  {option.label}
-                </button>
-              ))}
-            </div>
-          </div>
 
           <div className="form-field">
             <span className="form-label">Срок</span>

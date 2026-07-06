@@ -11,13 +11,17 @@ import {
 } from './api';
 import { stripAppBasePath, withAppBasePath } from './basePath';
 import ArchiveList from './components/ArchiveList';
+import BackgroundDecorations, { type BackgroundDecoration } from './components/BackgroundDecorations';
 import CategorySection from './components/CategorySection';
 import Header from './components/Header';
 import LoginScreen from './components/LoginScreen';
+import SearchBar from './components/SearchBar';
+import Toast, { ToastState } from './components/Toast';
 
 const CreateTaskModal = lazy(() => import('./components/CreateTaskModal'));
 const TaskDetailsModal = lazy(() => import('./components/TaskDetailsModal'));
 import { loadLocalState, sanitizeTasks, saveLocalState, serializeTasks } from './storage';
+import { triggerHaptic } from './utils/haptic';
 import type {
   BackupSnapshotResponse,
   BackupSource,
@@ -29,22 +33,143 @@ import type {
   SyncStatus,
   Task,
 } from './types';
+import { CATEGORIES } from './types';
 import { compareIsoDates } from './utils/dates';
 
-const CATEGORIES: Array<{ key: Category; label: string }> = [
-  { key: 'passion', label: 'Страсти' },
-  { key: 'routine', label: 'Бытец' },
-  { key: 'body', label: 'Тело' },
-  { key: 'projects', label: 'Projects' },
-];
 const AUTO_BACKUP_INTERVAL_MS = 5 * 60_000;
-const TASK_CLOSE_ANIMATION_MS = 760;
+const TASK_CLOSE_DELAY_MS = 10_000;
 const DRAG_SCROLL_EDGE_THRESHOLD_PX = 140;
 const DRAG_SCROLL_MAX_STEP_PX = 22;
 const DEFAULT_BACKUP_TOOLTIP =
   'Резервные копии создаются автоматически раз в 5 минут. Нажмите на точку, чтобы создать снимок сейчас.';
 const LOGIN_REQUIRED_TOOLTIP = 'Войдите, чтобы открыть MONDAY и синхронизировать задачи.';
 const SESSION_EXPIRED_MESSAGE = 'Сессия завершилась. Войдите снова.';
+const BACKGROUND_DECORATIONS_STORAGE_KEY = 'monday:background-decorations';
+const MAX_BACKGROUND_DECORATIONS = 6;
+const MAX_BACKGROUND_FILE_BYTES = 5 * 1024 * 1024;
+const MAX_BACKGROUND_DATA_URL_LENGTH = 1_600_000;
+const ACCEPTED_BACKGROUND_IMAGE_TYPES = new Set(['image/gif', 'image/jpeg', 'image/png', 'image/webp']);
+
+function isBackgroundDecoration(value: unknown): value is BackgroundDecoration {
+  if (typeof value !== 'object' || value === null) {
+    return false;
+  }
+
+  const decoration = value as Partial<BackgroundDecoration>;
+
+  return (
+    typeof decoration.id === 'string' &&
+    typeof decoration.name === 'string' &&
+    typeof decoration.src === 'string' &&
+    typeof decoration.left === 'number' &&
+    typeof decoration.top === 'number' &&
+    typeof decoration.width === 'number' &&
+    typeof decoration.opacity === 'number' &&
+    typeof decoration.rotation === 'number' &&
+    typeof decoration.depth === 'number'
+  );
+}
+
+function loadBackgroundDecorations(): BackgroundDecoration[] {
+  const raw = window.localStorage.getItem(BACKGROUND_DECORATIONS_STORAGE_KEY);
+
+  if (!raw) {
+    return [];
+  }
+
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.filter(isBackgroundDecoration).slice(0, MAX_BACKGROUND_DECORATIONS) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveBackgroundDecorations(decorations: BackgroundDecoration[]): boolean {
+  try {
+    if (decorations.length === 0) {
+      window.localStorage.removeItem(BACKGROUND_DECORATIONS_STORAGE_KEY);
+    } else {
+      window.localStorage.setItem(BACKGROUND_DECORATIONS_STORAGE_KEY, JSON.stringify(decorations));
+    }
+
+    return true;
+  } catch (error) {
+    console.error('[MONDAY] Failed to persist background decorations:', error);
+    return false;
+  }
+}
+
+function readFileAsDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+
+    reader.addEventListener('load', () => {
+      if (typeof reader.result === 'string') {
+        resolve(reader.result);
+      } else {
+        reject(new Error('FileReader result is not a data URL'));
+      }
+    });
+    reader.addEventListener('error', () => reject(reader.error ?? new Error('Failed to read file')));
+    reader.readAsDataURL(file);
+  });
+}
+
+function loadImage(dataUrl: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+
+    image.addEventListener('load', () => resolve(image));
+    image.addEventListener('error', () => reject(new Error('Failed to load image')));
+    image.src = dataUrl;
+  });
+}
+
+async function prepareBackgroundImage(file: File): Promise<string> {
+  const dataUrl = await readFileAsDataUrl(file);
+
+  if (file.type === 'image/gif') {
+    return dataUrl;
+  }
+
+  const image = await loadImage(dataUrl);
+  const maxSide = 1200;
+  const scale = Math.min(1, maxSide / Math.max(image.naturalWidth, image.naturalHeight));
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
+  canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
+
+  const context = canvas.getContext('2d');
+
+  if (!context) {
+    return dataUrl;
+  }
+
+  context.drawImage(image, 0, 0, canvas.width, canvas.height);
+  return canvas.toDataURL('image/webp', 0.82);
+}
+
+function createBackgroundDecoration(file: File, src: string, index: number): BackgroundDecoration {
+  const column = index % 3;
+  const row = Math.floor(index / 3) % 2;
+
+  return {
+    id: crypto.randomUUID(),
+    name: file.name,
+    src,
+    left: [8, 66, 28][column] ?? 12,
+    top: [10, 54][row] ?? 18,
+    width: 180 + (index % 3) * 46,
+    opacity: 0.2,
+    rotation: [-5, 4, -2, 6, -4, 3][index % 6] ?? 0,
+    depth: 0.45 + (index % 4) * 0.18,
+  };
+}
+
+function isFileDrag(event: React.DragEvent<HTMLElement>): boolean {
+  return Array.from(event.dataTransfer.types).includes('Files');
+}
 
 function getScreenFromPath(pathname: string): Screen {
   const relativePath = stripAppBasePath(pathname);
@@ -154,6 +279,15 @@ function App() {
   const [isBackuping, setIsBackuping] = useState(false);
   const [isAuthSubmitting, setIsAuthSubmitting] = useState(false);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
+  const [toast, setToast] = useState<ToastState | null>(null);
+  const [isInitialLoading, setIsInitialLoading] = useState(true);
+  const [isHeaderHidden, setIsHeaderHidden] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [backgroundDecorations, setBackgroundDecorations] = useState<BackgroundDecoration[]>(() =>
+    loadBackgroundDecorations(),
+  );
+  const [isBackgroundDragActive, setIsBackgroundDragActive] = useState(false);
+  const [parallaxState, setParallaxState] = useState({ pointerX: 0, pointerY: 0, scrollY: window.scrollY });
   const latestTasksRef = useRef(tasks);
   const serverVersionRef = useRef(serverVersion);
   const syncStatusRef = useRef<SyncStatus>(syncStatus);
@@ -166,6 +300,118 @@ function App() {
   const dragPointerYRef = useRef<number | null>(null);
   const dragScrollFrameRef = useRef<number | null>(null);
   const backupRunnerRef = useRef<(source: BackupSource) => void>(() => undefined);
+
+  async function addBackgroundFiles(files: FileList): Promise<void> {
+    const availableSlots = MAX_BACKGROUND_DECORATIONS - backgroundDecorations.length;
+
+    if (availableSlots <= 0) {
+      setToast({
+        id: Date.now(),
+        message: `Фон уже содержит максимум ${MAX_BACKGROUND_DECORATIONS} изображений`,
+      });
+      return;
+    }
+
+    const candidates = Array.from(files).filter(
+      (file) => ACCEPTED_BACKGROUND_IMAGE_TYPES.has(file.type) && file.size <= MAX_BACKGROUND_FILE_BYTES,
+    );
+    const selectedFiles = candidates.slice(0, availableSlots);
+
+    if (selectedFiles.length === 0) {
+      setToast({
+        id: Date.now(),
+        message: 'Добавьте изображение до 5 МБ в PNG, JPG, WebP или GIF',
+      });
+      return;
+    }
+
+    const prepared = await Promise.allSettled(
+      selectedFiles.map(async (file, index) => {
+        const src = await prepareBackgroundImage(file);
+
+        if (src.length > MAX_BACKGROUND_DATA_URL_LENGTH) {
+          throw new Error('Prepared image is too large for localStorage');
+        }
+
+        return createBackgroundDecoration(file, src, backgroundDecorations.length + index);
+      }),
+    );
+    const nextDecorations = prepared
+      .filter((result): result is PromiseFulfilledResult<BackgroundDecoration> => result.status === 'fulfilled')
+      .map((result) => result.value);
+
+    if (nextDecorations.length === 0) {
+      setToast({
+        id: Date.now(),
+        message: 'Не удалось подготовить изображение для фона',
+      });
+      return;
+    }
+
+    const nextState = [...backgroundDecorations, ...nextDecorations].slice(0, MAX_BACKGROUND_DECORATIONS);
+
+    if (!saveBackgroundDecorations(nextState)) {
+      setToast({
+        id: Date.now(),
+        message: 'Не удалось сохранить фон: хранилище браузера заполнено',
+      });
+      return;
+    }
+
+    setBackgroundDecorations(nextState);
+    setToast({
+      id: Date.now(),
+      message: nextDecorations.length === 1 ? 'Изображение добавлено на фон' : 'Изображения добавлены на фон',
+    });
+  }
+
+  function clearBackgroundDecorations(): void {
+    saveBackgroundDecorations([]);
+    setBackgroundDecorations([]);
+    setToast({
+      id: Date.now(),
+      message: 'Фон очищен',
+    });
+  }
+
+  function handleBackgroundDragEnter(event: React.DragEvent<HTMLDivElement>): void {
+    if (!isFileDrag(event)) {
+      return;
+    }
+
+    event.preventDefault();
+    setIsBackgroundDragActive(true);
+  }
+
+  function handleBackgroundDragOver(event: React.DragEvent<HTMLDivElement>): void {
+    if (!isFileDrag(event)) {
+      return;
+    }
+
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'copy';
+    setIsBackgroundDragActive(true);
+  }
+
+  function handleBackgroundDragLeave(event: React.DragEvent<HTMLDivElement>): void {
+    const nextTarget = event.relatedTarget;
+
+    if (nextTarget instanceof Node && event.currentTarget.contains(nextTarget)) {
+      return;
+    }
+
+    setIsBackgroundDragActive(false);
+  }
+
+  function handleBackgroundDrop(event: React.DragEvent<HTMLDivElement>): void {
+    if (!isFileDrag(event)) {
+      return;
+    }
+
+    event.preventDefault();
+    setIsBackgroundDragActive(false);
+    void addBackgroundFiles(event.dataTransfer.files);
+  }
 
   function clearClosingAnimations(): void {
     Object.values(closingTimeoutsRef.current).forEach((timeoutId) => window.clearTimeout(timeoutId));
@@ -251,6 +497,53 @@ function App() {
     },
     [],
   );
+
+  useEffect(() => {
+    let frame: number | null = null;
+    const nextParallax = {
+      pointerX: 0,
+      pointerY: 0,
+      scrollY: window.scrollY,
+    };
+
+    function commitParallax() {
+      frame = null;
+      setParallaxState({ ...nextParallax });
+    }
+
+    function scheduleParallaxUpdate() {
+      if (frame !== null) {
+        return;
+      }
+
+      frame = window.requestAnimationFrame(commitParallax);
+    }
+
+    function handleScroll() {
+      nextParallax.scrollY = window.scrollY;
+      scheduleParallaxUpdate();
+    }
+
+    function handlePointerMove(event: PointerEvent) {
+      const width = Math.max(window.innerWidth, 1);
+      const height = Math.max(window.innerHeight, 1);
+      nextParallax.pointerX = (event.clientX / width - 0.5) * 2;
+      nextParallax.pointerY = (event.clientY / height - 0.5) * 2;
+      scheduleParallaxUpdate();
+    }
+
+    window.addEventListener('scroll', handleScroll, { passive: true });
+    window.addEventListener('pointermove', handlePointerMove, { passive: true });
+
+    return () => {
+      window.removeEventListener('scroll', handleScroll);
+      window.removeEventListener('pointermove', handlePointerMove);
+
+      if (frame !== null) {
+        window.cancelAnimationFrame(frame);
+      }
+    };
+  }, []);
 
   useEffect(() => {
     let isCancelled = false;
@@ -367,6 +660,7 @@ function App() {
       } finally {
         if (!isCancelled && !didLoseAuth) {
           hasInitializedSyncRef.current = true;
+          setIsInitialLoading(false);
         }
       }
     }
@@ -517,6 +811,36 @@ function App() {
     }, AUTO_BACKUP_INTERVAL_MS);
 
     return () => window.clearInterval(intervalId);
+  }, []);
+
+  useEffect(() => {
+    let frame: number | null = null;
+    let lastY = window.scrollY;
+
+    function handleScroll() {
+      if (frame !== null) return;
+      frame = window.requestAnimationFrame(() => {
+        const currentY = window.scrollY;
+        const delta = currentY - lastY;
+
+        if (currentY > 80 && delta > 4) {
+          setIsHeaderHidden(true);
+        } else if (delta < -4 || currentY < 16) {
+          setIsHeaderHidden(false);
+        }
+
+        lastY = currentY;
+        frame = null;
+      });
+    }
+
+    window.addEventListener('scroll', handleScroll, { passive: true });
+    return () => {
+      window.removeEventListener('scroll', handleScroll);
+      if (frame !== null) {
+        window.cancelAnimationFrame(frame);
+      }
+    };
   }, []);
 
   useEffect(() => {
@@ -681,13 +1005,21 @@ function App() {
     }
   }
 
-  const openTasks = useMemo(() => tasks.filter((task) => task.status === 'open'), [tasks]);
+  const visibleTasks = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase();
+    if (!query) return tasks;
+    return tasks.filter(
+      (task) =>
+        task.title.toLowerCase().includes(query) || task.description.toLowerCase().includes(query),
+    );
+  }, [tasks, searchQuery]);
+  const openTasks = useMemo(() => visibleTasks.filter((task) => task.status === 'open'), [visibleTasks]);
   const archiveTasks = useMemo(
     () =>
-      tasks
+      visibleTasks
         .filter((task) => task.status === 'closed')
         .sort((left, right) => (right.closedAt ?? '').localeCompare(left.closedAt ?? '')),
-    [tasks],
+    [visibleTasks],
   );
   const tasksByCategory = useMemo(() => {
     const grouped: Record<Category, Task[]> = { passion: [], routine: [], body: [], projects: [] };
@@ -695,7 +1027,12 @@ function App() {
       grouped[task.category].push(task);
     }
     for (const key of Object.keys(grouped) as Category[]) {
-      grouped[key].sort((left, right) => left.createdAt.localeCompare(right.createdAt));
+      grouped[key].sort((left, right) => {
+        const leftPin = left.pinned ? 1 : 0;
+        const rightPin = right.pinned ? 1 : 0;
+        if (leftPin !== rightPin) return rightPin - leftPin;
+        return left.createdAt.localeCompare(right.createdAt);
+      });
     }
     return grouped;
   }, [openTasks]);
@@ -761,6 +1098,16 @@ function App() {
     );
   }
 
+  function saveTaskTitle(taskId: string, nextTitle: string) {
+    setTasks((current) =>
+      current.map((task) =>
+        task.id === taskId && task.status === 'open' && task.title !== nextTitle
+          ? { ...task, title: nextTitle }
+          : task,
+      ),
+    );
+  }
+
   function finalizeArchiveTask(taskId: string) {
     setTasks((current) =>
       current.map((task) =>
@@ -776,6 +1123,27 @@ function App() {
     setSelectedTaskId(null);
   }
 
+  function undoArchive(taskId: string) {
+    const closingTimeoutId = closingTimeoutsRef.current[taskId];
+    if (closingTimeoutId) {
+      window.clearTimeout(closingTimeoutId);
+      delete closingTimeoutsRef.current[taskId];
+    }
+    setClosingTaskIds((current) => current.filter((candidate) => candidate !== taskId));
+    setTasks((current) =>
+      current.map((task) =>
+        task.id === taskId
+          ? {
+              ...task,
+              status: 'open',
+              closedAt: undefined,
+            }
+          : task,
+      ),
+    );
+    triggerHaptic('light');
+  }
+
   function archiveTask(taskId: string) {
     const task = latestTasksRef.current.find((candidate) => candidate.id === taskId);
 
@@ -789,12 +1157,21 @@ function App() {
 
     setSelectedTaskId((current) => (current === taskId ? null : current));
     setClosingTaskIds((current) => (current.includes(taskId) ? current : [...current, taskId]));
+    triggerHaptic('medium');
 
     closingTimeoutsRef.current[taskId] = window.setTimeout(() => {
       finalizeArchiveTask(taskId);
       setClosingTaskIds((current) => current.filter((candidate) => candidate !== taskId));
       delete closingTimeoutsRef.current[taskId];
-    }, TASK_CLOSE_ANIMATION_MS);
+    }, TASK_CLOSE_DELAY_MS);
+
+    setToast({
+      id: Date.now(),
+      message: 'Задача в архиве',
+      actionLabel: 'Вернуть',
+      onAction: () => undoArchive(taskId),
+      duration: TASK_CLOSE_DELAY_MS,
+    });
   }
 
   function restoreTask(taskId: string) {
@@ -809,9 +1186,11 @@ function App() {
           : task,
       ),
     );
+    triggerHaptic('light');
   }
 
   function deleteTask(taskId: string) {
+    const taskToDelete = latestTasksRef.current.find((candidate) => candidate.id === taskId);
     const closingTimeoutId = closingTimeoutsRef.current[taskId];
 
     if (closingTimeoutId) {
@@ -822,6 +1201,19 @@ function App() {
     setTasks((current) => current.filter((task) => task.id !== taskId));
     setClosingTaskIds((current) => current.filter((candidate) => candidate !== taskId));
     setSelectedTaskId((current) => (current === taskId ? null : current));
+    triggerHaptic('warning');
+
+    if (taskToDelete) {
+      setToast({
+        id: Date.now(),
+        message: 'Задача удалена',
+        actionLabel: 'Вернуть',
+        onAction: () => {
+          setTasks((current) => [taskToDelete, ...current]);
+          triggerHaptic('light');
+        },
+      });
+    }
   }
 
   function startTaskDrag(taskId: string) {
@@ -838,6 +1230,7 @@ function App() {
   }
 
   function moveTaskToCategory(taskId: string, nextCategory: Category) {
+    let didChange = false;
     setTasks((current) => {
       let hasChanged = false;
 
@@ -853,8 +1246,13 @@ function App() {
         };
       });
 
+      didChange = hasChanged;
       return hasChanged ? nextTasks : current;
     });
+
+    if (didChange) {
+      triggerHaptic('medium');
+    }
   }
 
   if (authStatus !== 'authenticated') {
@@ -862,21 +1260,40 @@ function App() {
   }
 
   return (
-    <div className="app">
+    <div
+      className={`app${isBackgroundDragActive ? ' app--background-dragging' : ''}`}
+      onDragEnter={handleBackgroundDragEnter}
+      onDragLeave={handleBackgroundDragLeave}
+      onDragOver={handleBackgroundDragOver}
+      onDrop={handleBackgroundDrop}
+    >
+      <BackgroundDecorations
+        decorations={backgroundDecorations}
+        pointerX={parallaxState.pointerX}
+        pointerY={parallaxState.pointerY}
+        scrollY={parallaxState.scrollY}
+      />
+      {isBackgroundDragActive && <div className="background-drop-hint">Отпустите изображение на фон</div>}
       <div className="app__inner">
         <Header
           backupTooltip={backupTooltip}
           screen={screen}
           currentUser={currentUser}
+          hasBackgroundDecorations={backgroundDecorations.length > 0}
           isBackuping={isBackuping}
+          isCollapsed={isHeaderHidden}
           isLoggingOut={isLoggingOut}
           syncStatus={syncStatus}
           syncTooltip={syncTooltip}
+          onBackgroundFiles={(files) => void addBackgroundFiles(files)}
           onBackup={() => backupRunnerRef.current('manual')}
+          onClearBackground={clearBackgroundDecorations}
           onCreate={() => setCreateModalOpen(true)}
           onLogout={() => void handleLogout()}
           onToggleScreen={() => navigateToScreen(screen === 'active' ? 'archive' : 'active')}
         />
+
+        <SearchBar value={searchQuery} onChange={setSearchQuery} />
 
         {conflictState && (
           <section className="sync-alert sync-alert--conflict" role="status">
@@ -906,6 +1323,7 @@ function App() {
                     category={category.key}
                     label={category.label}
                     tasks={tasksForCategory}
+                    isLoading={isInitialLoading}
                     draggedTaskId={draggedTaskId}
                     draggedTaskCategory={draggedTask?.category ?? null}
                     isDropTarget={dropTargetCategory === category.key}
@@ -924,6 +1342,8 @@ function App() {
                     onTaskDragStart={startTaskDrag}
                     onTaskDrop={moveTaskToCategory}
                     onTaskOpen={setSelectedTaskId}
+                    onTaskSaveTitle={saveTaskTitle}
+                    onTaskChangeCategory={moveTaskToCategory}
                   />
                 );
               })}
@@ -945,7 +1365,6 @@ function App() {
         <Suspense fallback={null}>
           <TaskDetailsModal
             task={selectedTask}
-            categories={CATEGORIES}
             onArchive={archiveTask}
             onClose={() => setSelectedTaskId(null)}
             onDelete={deleteTask}
@@ -965,6 +1384,8 @@ function App() {
           />
         </Suspense>
       )}
+
+      <Toast toast={toast} onDismiss={() => setToast(null)} />
     </div>
   );
 }

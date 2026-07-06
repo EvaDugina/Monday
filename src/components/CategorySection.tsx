@@ -1,11 +1,13 @@
 import type { Category, Task } from '../types';
 import InlineCreator from './InlineCreator';
+import TaskCardSkeleton from './TaskCardSkeleton';
 import TaskItem from './TaskItem';
 
 interface CategorySectionProps {
   category: Category;
   label: string;
   tasks: Task[];
+  isLoading?: boolean;
   draggedTaskId: string | null;
   draggedTaskCategory: Category | null;
   closingTaskIds: string[];
@@ -17,12 +19,15 @@ interface CategorySectionProps {
   onTaskDrop: (taskId: string, category: Category) => void;
   onTaskOpen: (taskId: string) => void;
   onQuickClose: (taskId: string) => void;
+  onTaskSaveTitle?: (taskId: string, title: string) => void;
+  onTaskChangeCategory?: (taskId: string, category: Category) => void;
 }
 
 function CategorySection({
   category,
   label,
   tasks,
+  isLoading = false,
   draggedTaskId,
   draggedTaskCategory,
   closingTaskIds,
@@ -34,6 +39,8 @@ function CategorySection({
   onTaskDrop,
   onTaskOpen,
   onQuickClose,
+  onTaskSaveTitle,
+  onTaskChangeCategory,
 }: CategorySectionProps) {
   function isTaskDragEvent(event: React.DragEvent<HTMLElement>): boolean {
     return event.dataTransfer.types.includes('application/x-monday-task-id') || draggedTaskId !== null;
@@ -135,8 +142,18 @@ function CategorySection({
               onDragEnd={onTaskDragEnd}
               onOpen={() => onTaskOpen(task.id)}
               onQuickClose={() => onQuickClose(task.id)}
+              onSaveTitle={onTaskSaveTitle}
+              onChangeCategory={onTaskChangeCategory}
+              onTouchDragOver={onDropTargetChange}
+              onTouchDrop={(nextCategory) => onTaskDrop(task.id, nextCategory)}
             />
           ))
+        ) : isLoading ? (
+          <>
+            <TaskCardSkeleton width="long" />
+            <TaskCardSkeleton width="medium" />
+            <TaskCardSkeleton width="short" />
+          </>
         ) : (
           <div className="empty-state">
             Пока пусто. Добавьте задачу через поле ниже

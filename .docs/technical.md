@@ -4,9 +4,9 @@
 
 - Статус: approved
 - Владелец: команда проекта
-- Последнее обновление: 2026-04-24
+- Последнее обновление: 2026-07-06
 - Стадия проекта: `POC B`
-- Версия проекта: `v0.1.1`
+- Версия проекта: `v0.1.3`
 - Предыдущая версия: `не применимо`
 - Следующий целевой этап: `MVP A`
 - Архив финальной версии предыдущего этапа: `не применимо, каноническая пара документов вводится впервые`
@@ -18,6 +18,7 @@
   - `MVP B -> v0.3.N`
 - Связанные документы:
   - `.docs/product.md`
+  - `.docs/demo.md`
   - `README.md`
   - `.env.example`
   - `deploy/compose.dev.yml`
@@ -58,7 +59,7 @@
 
 ### 2.1. Назначение системы
 
-Система предоставляет веб-доску задач с локальным состоянием, серверным снимком состояния, optimistic concurrency, архивом и резервными снимками, а также отдельный hosted-контур с reverse proxy и внешней аутентификацией.
+Система предоставляет веб-доску задач с локальным состоянием, серверным снимком состояния, optimistic concurrency, архивом, резервными снимками и локальными декоративными настройками фона, а также отдельный hosted-контур с reverse proxy и внешней аутентификацией.
 
 ### 2.2. Границы системы
 
@@ -69,7 +70,8 @@
 ### 2.3. Ключевые технические сущности
 
 - `Task`: единица пользовательской работы на доске.
-- `Deadline`: дедлайн задачи (`none`, `date`, `range`, `recurring`).
+- `Deadline`: дедлайн задачи (`none`, `date`, `range`, `recurring`; weekly recurring использует `mode=week` и `weekday`).
+- `BackgroundDecoration`: локальная браузерная настройка фонового изображения; не входит в серверный snapshot.
 - `ServerTasksState`: серверный снимок массива задач, `updatedAt` и `version`.
 - `task_backups`: таблица резервных снимков с привязкой к пользователю-инициатору.
 - auth headers от reverse proxy: источник текущего identity context для API.
@@ -122,6 +124,11 @@
   - UI вызывает `POST /api/backups`
   - API создает или переиспользует последний backup текущей версии
   - retention ограничивает число последних backup-снимков на пользователя
+- Background decorations:
+  - UI принимает image-файлы через input или page-level drag&drop
+  - клиент сжимает изображения для локального хранения, кроме GIF
+  - настройки пишутся в `localStorage` отдельно от task snapshot
+  - слой фона рендерится за доской и получает parallax-offset от scroll/pointer
 - Hosted auth:
   - reverse proxy передает identity headers
   - API извлекает auth context из заголовков
@@ -139,13 +146,15 @@
 ### 4.1. Главные директории и файлы
 
 - `src/App.tsx`
-  - orchestration UI, sync loop, backup loop, archive flow, conflict flow
+  - orchestration UI, sync loop, backup loop, archive flow, conflict flow, local background decoration flow
 - `src/api.ts`
   - typed API client и нормализация ошибок
 - `src/storage.ts`
   - localStorage persistence, archive pruning, sanitization
 - `src/types.ts`
   - frontend contracts
+- `src/components/BackgroundDecorations.tsx`
+  - декоративный фоновый слой и parallax-transform для локальных изображений
 - `server/src/index.ts`
   - routing, health endpoints, auth gating, rate limiters, error handling
 - `server/src/db.ts`
@@ -192,6 +201,13 @@
 
 - frontend `Task`:
   - `id`, `title`, `description`, `category`, `deadline`, `urgent`, `status`, `createdAt`, `closedAt?`
+- weekly recurring badge:
+  - вычисляется на клиенте из существующего `deadline.kind === 'recurring'` и `deadline.mode === 'week'`
+  - не добавляет новое поле в snapshot и не требует миграции SQLite
+- frontend `BackgroundDecoration`:
+  - `id`, `name`, `src`, `left`, `top`, `width`, `opacity`, `rotation`, `depth`
+  - хранится в `localStorage` по ключу `monday:background-decorations`
+  - ограничивается шестью изображениями и не сериализуется в `tasks_json`
 - `LocalStateSnapshot`:
   - локальные `tasks`, `version`, `updatedAt`
 - SQLite tables:
@@ -217,9 +233,11 @@
 - `category` ограничен набором `passion | routine | body | projects`
 - `status` ограничен `open | closed`
 - `urgent` обязателен как boolean
+- `deadline.kind='recurring'` поддерживает `mode='day' | 'week' | 'month'`; для `week` обязателен `weekday` от `0` до `6`
 - `closedAt` обязателен только для `closed` задачи
 - `PUT /api/tasks` использует optimistic concurrency и не делает merge при несовпадении версии
 - backup снимок не дублируется, если последняя сохраненная версия для пользователя уже совпадает с текущей
+- фоновые декорации не являются частью API-контракта и не должны попадать в `PUT /api/tasks`
 
 ## 6. Окружения и конфигурация
 
@@ -257,6 +275,7 @@
 - для полного локального и production-сценария требуется Docker Compose
 - API зависит от файлового SQLite-хранилища
 - client-side логика рассчитана на современный браузер с `localStorage`, `fetch` и `crypto.randomUUID`
+- фоновые изображения ограничены quota локального хранилища браузера; при переполнении UI должен показать ошибку и оставить доску рабочей
 - in-memory rate limiting не переживает рестарт сервиса и не распределяется между несколькими инстансами
 
 ### 7.2. Нефункциональные требования в реализации
@@ -300,6 +319,7 @@
 ### 8.2. Ручная проверка
 
 - локальный сценарий доски: создание, редактирование, перемещение, архив, восстановление
+- локальная персонализация фона: upload, drag&drop, parallax, очистка
 - сценарий синхронизации: проверка статусов `syncing`, `offline`, `conflict`
 - сценарий backup: ручной запуск и повторный вызов без новой версии
 - hosted-сценарий: auth redirect и smoke path
@@ -373,7 +393,13 @@
 - Шаги:
   - открыть `http://localhost:8080`
   - создать по одной задаче минимум в двух разных категориях
-  - отредактировать описание, дедлайн и срочность одной задачи
+  - отредактировать описание, дедлайн, еженедельный повтор и срочность одной задачи
+  - открыть модалку редактирования задачи и убедиться, что выбора категории в ней нет
+  - убедиться, что weekly recurring задача получила синюю метку на карточке, а inline-редактирование заголовка не растягивает input на всю строку
+  - добавить изображение на фон через кнопку загрузки и убедиться, что оно появилось за доской
+  - перетащить image-файл на страницу и убедиться, что drag&drop задач после этого не сломан
+  - прокрутить страницу или подвигать указатель и проверить легкий parallax-эффект фона
+  - очистить фон кнопкой в header
   - перетащить задачу в другую категорию
   - закрыть задачу и убедиться, что она появилась в архиве
   - восстановить задачу из архива
@@ -495,9 +521,23 @@
 - Связанные планы и требования:
   - `PLAN-001`, `PD-004`
 
+### TD-005. Local-only background decorations
+
+- Статус: approved
+- Контекст:
+  - фоновая декорация нужна как персональная настройка интерфейса, а не как часть данных доски.
+- Решение:
+  - изображения хранятся в браузерном `localStorage` по отдельному ключу и рендерятся отдельным компонентом за доской.
+- Последствия:
+  - API, SQLite schema, backup retention и optimistic concurrency остаются без изменений; фон не синхронизируется между устройствами.
+- Связанные планы и требования:
+  - `REQ-009`, `PD-005`
+
 ## 14. История изменений документа
 
 - История ниже ведется только в рамках текущего этапа.
 - Межэтапная история сохраняется через архив финальной версии этапа.
 - `2026-04-23 | v0.1.0 | тип: mixed | важность: важно в документации | впервые создан канонический technical document для MONDAY и зафиксирован фактический POC B контур`
 - `2026-04-24 | v0.1.1 | тип: hardening | важность: важно для hosted-контура | security headers, async scrypt + SHA-256 comparison, rate-limit на health, согласование payload-лимитов, параметризация backup/restore для timeweb, CSRF-модель зафиксирована как SameSite+JSON-only`
+- `2026-07-06 | v0.1.2 | тип: UX | важность: важно в документации | weekly recurring badge построен поверх существующего Deadline-контракта, inline title input ограничен как flex-item и не ломает grid карточки, category picker убран из edit-modal`
+- `2026-07-06 | v0.1.3 | тип: UX | важность: важно в документации | background decorations вынесены в localStorage-only UI слой с upload/drag&drop, очисткой и parallax без изменений API/SQLite`

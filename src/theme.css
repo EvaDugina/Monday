@@ -9,6 +9,8 @@
   --urgent-bg: rgb(253, 235, 236);
   --soon: rgb(217, 115, 13);
   --soon-bg: rgb(251, 236, 221);
+  --repeat: #2563eb;
+  --repeat-bg: #eff6ff;
   --sync-ok: #2f9e44;
   --sync-pending: #adb5bd;
   --sync-offline: #d97706;

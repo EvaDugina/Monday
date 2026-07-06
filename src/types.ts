@@ -13,6 +13,7 @@ export interface Task {
   category: Category;
   deadline: Deadline;
   urgent: boolean;
+  pinned?: boolean;
   status: 'open' | 'closed';
   createdAt: string;
   closedAt?: string;
@@ -53,3 +54,15 @@ export const MAX_TITLE_LENGTH = 200;
 export const MAX_DESCRIPTION_LENGTH = 2000;
 
 export type SyncStatus = 'synced' | 'syncing' | 'offline' | 'conflict' | 'invalid';
+
+export interface CategoryOption {
+  key: Category;
+  label: string;
+}
+
+export const CATEGORIES: CategoryOption[] = [
+  { key: 'passion', label: 'Страсти' },
+  { key: 'routine', label: 'Бытец' },
+  { key: 'body', label: 'Тело' },
+  { key: 'projects', label: 'Projects' },
+];
