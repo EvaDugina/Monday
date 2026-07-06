@@ -1,40 +1,30 @@
-import { useEffect, useState } from 'react';
-import { withAppBasePath } from '../basePath';
+import { useEffect, useRef, useState } from 'react';
+import { buildApiPath, withAppBasePath } from '../basePath';
 
 const WEATHER_CITY_STORAGE_KEY = 'monday:weather-city';
 const DEFAULT_CITY_ID = 'moscow';
 const WEATHER_ICON_BASE_PATH = '/weather-icons';
+const WEATHER_FLAG_BASE_PATH = '/flags';
+const WEATHER_REQUEST_TIMEOUT_MS = 8000;
+
+type WeatherCountryCode = 'ru' | 'ge';
 
 interface WeatherCityOption {
   id: string;
   label: string;
+  countryCode: WeatherCountryCode;
   latitude: number;
   longitude: number;
 }
 
 const WEATHER_CITY_OPTIONS: WeatherCityOption[] = [
-  { id: 'moscow', label: 'Москва', latitude: 55.7558, longitude: 37.6173 },
-  { id: 'saint-petersburg', label: 'Санкт-Петербург', latitude: 59.9343, longitude: 30.3351 },
-  { id: 'novosibirsk', label: 'Новосибирск', latitude: 55.0084, longitude: 82.9357 },
-  { id: 'yekaterinburg', label: 'Екатеринбург', latitude: 56.8389, longitude: 60.6057 },
-  { id: 'kazan', label: 'Казань', latitude: 55.7961, longitude: 49.1064 },
-  { id: 'nizhny-novgorod', label: 'Нижний Новгород', latitude: 56.2965, longitude: 43.9361 },
-  { id: 'sochi', label: 'Сочи', latitude: 43.6028, longitude: 39.7342 },
-  { id: 'kaliningrad', label: 'Калининград', latitude: 54.7104, longitude: 20.4522 },
-  { id: 'vladivostok', label: 'Владивосток', latitude: 43.1155, longitude: 131.8855 },
-  { id: 'tbilisi', label: 'Тбилиси', latitude: 41.7151, longitude: 44.8271 },
-  { id: 'london', label: 'Лондон', latitude: 51.5072, longitude: -0.1276 },
-  { id: 'berlin', label: 'Берлин', latitude: 52.52, longitude: 13.405 },
-  { id: 'paris', label: 'Париж', latitude: 48.8566, longitude: 2.3522 },
-  { id: 'new-york', label: 'Нью-Йорк', latitude: 40.7128, longitude: -74.006 },
-  { id: 'dubai', label: 'Дубай', latitude: 25.2048, longitude: 55.2708 },
+  { id: 'moscow', label: 'Москва', countryCode: 'ru', latitude: 55.7558, longitude: 37.6173 },
+  { id: 'tbilisi', label: 'Тбилиси', countryCode: 'ge', latitude: 41.7151, longitude: 44.8271 },
 ];
 
 interface ForecastResponse {
   current?: {
     precipitation?: number;
-    rain?: number;
-    showers?: number;
     temperature_2m?: number;
     weather_code?: number;
     is_day?: number;
@@ -100,7 +90,7 @@ function isRainyForecast(current: ForecastResponse['current']): boolean {
     return false;
   }
 
-  if ((current.rain ?? 0) > 0 || (current.showers ?? 0) > 0 || (current.precipitation ?? 0) > 0) {
+  if ((current.precipitation ?? 0) > 0) {
     return true;
   }
 
@@ -117,6 +107,10 @@ function withDayNight(iconCode: string, isDay: boolean | null): string {
 
 function getWeatherIconUrl(iconCode: string): string {
   return withAppBasePath(`${WEATHER_ICON_BASE_PATH}/${iconCode}.svg`);
+}
+
+function getWeatherFlagUrl(countryCode: WeatherCountryCode): string {
+  return withAppBasePath(`${WEATHER_FLAG_BASE_PATH}/${countryCode}.svg`);
 }
 
 function getWeatherVisual(
@@ -186,13 +180,14 @@ async function fetchWeather(
   city: WeatherCityOption,
   signal: AbortSignal,
 ): Promise<{ isDay: boolean | null; isRainy: boolean; temperature: string; weatherCode: number | null }> {
-  const forecastUrl = new URL('https://api.open-meteo.com/v1/forecast');
+  const forecastUrl = new URL(buildApiPath('weather/current'), window.location.origin);
   forecastUrl.searchParams.set('latitude', String(city.latitude));
   forecastUrl.searchParams.set('longitude', String(city.longitude));
-  forecastUrl.searchParams.set('current', 'temperature_2m,weather_code,is_day,precipitation,rain,showers');
-  forecastUrl.searchParams.set('timezone', 'auto');
 
-  const forecastResponse = await fetch(forecastUrl, { signal });
+  const forecastResponse = await fetch(forecastUrl, {
+    credentials: 'same-origin',
+    signal,
+  });
 
   if (!forecastResponse.ok) {
     throw new Error('Failed to load weather');
@@ -225,10 +220,14 @@ function WeatherBadge({ onRainChange }: WeatherBadgeProps) {
   const [isDay, setIsDay] = useState<boolean | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [hasError, setHasError] = useState(false);
+  const [isCityMenuOpen, setIsCityMenuOpen] = useState(false);
+  const cityPickerRef = useRef<HTMLDivElement>(null);
   const weatherVisual = hasError ? getWeatherVisual(null, true) : getWeatherVisual(weatherCode, isDay);
 
   useEffect(() => {
     const controller = new AbortController();
+    let isActive = true;
+    const timeoutId = window.setTimeout(() => controller.abort(), WEATHER_REQUEST_TIMEOUT_MS);
 
     setIsLoading(true);
     setHasError(false);
@@ -236,13 +235,17 @@ function WeatherBadge({ onRainChange }: WeatherBadgeProps) {
 
     void fetchWeather(selectedCity, controller.signal)
       .then((result) => {
+        if (!isActive) {
+          return;
+        }
+
         setTemperature(result.temperature);
         setWeatherCode(result.weatherCode);
         setIsDay(result.isDay);
         onRainChange?.(result.isRainy);
       })
-      .catch((error) => {
-        if (error instanceof DOMException && error.name === 'AbortError') {
+      .catch(() => {
+        if (!isActive) {
           return;
         }
 
@@ -253,18 +256,58 @@ function WeatherBadge({ onRainChange }: WeatherBadgeProps) {
         onRainChange?.(false);
       })
       .finally(() => {
-        if (!controller.signal.aborted) {
+        window.clearTimeout(timeoutId);
+
+        if (isActive) {
           setIsLoading(false);
         }
       });
 
-    return () => controller.abort();
+    return () => {
+      isActive = false;
+      window.clearTimeout(timeoutId);
+      controller.abort();
+    };
   }, [onRainChange, selectedCity]);
 
-  function handleCityChange(event: React.ChangeEvent<HTMLSelectElement>) {
-    const nextCityId = event.target.value;
+  useEffect(() => {
+    if (!isCityMenuOpen) {
+      return;
+    }
+
+    function handlePointerDown(event: PointerEvent) {
+      if (event.target instanceof Node && cityPickerRef.current?.contains(event.target)) {
+        return;
+      }
+
+      setIsCityMenuOpen(false);
+    }
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === 'Escape') {
+        setIsCityMenuOpen(false);
+      }
+    }
+
+    window.addEventListener('pointerdown', handlePointerDown);
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('pointerdown', handlePointerDown);
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [isCityMenuOpen]);
+
+  function handleCityChange(nextCityId: string) {
     setCityId(nextCityId);
     saveWeatherCityId(nextCityId);
+    setIsCityMenuOpen(false);
+  }
+
+  function handleCityButtonKeyDown(event: React.KeyboardEvent<HTMLButtonElement>) {
+    if (event.key === 'ArrowDown' || event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      setIsCityMenuOpen(true);
+    }
   }
 
   return (
@@ -283,16 +326,56 @@ function WeatherBadge({ onRainChange }: WeatherBadgeProps) {
         aria-hidden="true"
         draggable={false}
       />
-      <label className="weather-badge__city-label">
-        <span className="sr-only">Город для погоды</span>
-        <select className="weather-badge__city-select" value={cityId} onChange={handleCityChange}>
-          {WEATHER_CITY_OPTIONS.map((city) => (
-            <option key={city.id} value={city.id}>
-              {city.label}
-            </option>
-          ))}
-        </select>
-      </label>
+      <div ref={cityPickerRef} className="weather-badge__city-picker">
+        <button
+          type="button"
+          className="weather-badge__city-select"
+          aria-haspopup="listbox"
+          aria-expanded={isCityMenuOpen}
+          aria-label={`Город для погоды: ${selectedCity.label}`}
+          onClick={() => setIsCityMenuOpen((current) => !current)}
+          onKeyDown={handleCityButtonKeyDown}
+        >
+          <img
+            className="weather-badge__flag"
+            src={getWeatherFlagUrl(selectedCity.countryCode)}
+            alt=""
+            aria-hidden="true"
+            draggable={false}
+          />
+          <span className="weather-badge__city-name">{selectedCity.label}</span>
+        </button>
+
+        {isCityMenuOpen && (
+          <div className="weather-badge__city-menu" role="listbox" aria-label="Город для погоды">
+            {WEATHER_CITY_OPTIONS.map((city) => {
+              const isSelected = city.id === cityId;
+
+              return (
+                <button
+                  key={city.id}
+                  type="button"
+                  role="option"
+                  aria-selected={isSelected}
+                  className={`weather-badge__city-option${
+                    isSelected ? ' weather-badge__city-option--active' : ''
+                  }`}
+                  onClick={() => handleCityChange(city.id)}
+                >
+                  <img
+                    className="weather-badge__flag"
+                    src={getWeatherFlagUrl(city.countryCode)}
+                    alt=""
+                    aria-hidden="true"
+                    draggable={false}
+                  />
+                  <span className="weather-badge__city-name">{city.label}</span>
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </div>
       <span className="weather-badge__temperature">{isLoading ? '...' : temperature ?? '--°'}</span>
     </span>
   );

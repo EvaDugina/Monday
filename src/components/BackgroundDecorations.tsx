@@ -1,5 +1,5 @@
-import { Maximize2, X } from 'lucide-react';
-import { useRef, useState } from 'react';
+import { X } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
 
 export interface BackgroundDecoration {
   anchor?: 'center';
@@ -20,9 +20,7 @@ interface BackgroundDecorationsProps {
   isEditing: boolean;
   onDecorationDelete: (id: string) => void;
   onDecorationMove: (id: string, left: number, top: number) => void;
-  onDecorationMoveEnd: () => void;
-  onDecorationResize: (id: string, width: number, height: number) => void;
-  onDecorationResizeEnd: () => void;
+  onDecorationResize: (id: string, nextDecoration: Pick<BackgroundDecoration, 'height' | 'left' | 'top' | 'width'>) => void;
 }
 
 interface DragState {
@@ -32,13 +30,20 @@ interface DragState {
   pointerId: number;
 }
 
-type ResizeHandle = 'bottom' | 'corner' | 'right';
+type ResizeHandle = 'bottom-left' | 'bottom-right' | 'top-left' | 'top-right';
 
 interface ResizeState {
   handle: ResizeHandle;
   startHeight: number;
   id: string;
+  layerHeight: number;
+  layerLeft: number;
+  layerTop: number;
+  layerWidth: number;
   pointerId: number;
+  rotation: number;
+  startCenterX: number;
+  startCenterY: number;
   startWidth: number;
   startX: number;
   startY: number;
@@ -56,6 +61,21 @@ const MIN_DECORATION_HEIGHT = 72;
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max);
+}
+
+function rotateVector(x: number, y: number, degrees: number): { x: number; y: number } {
+  const radians = (degrees * Math.PI) / 180;
+  const cos = Math.cos(radians);
+  const sin = Math.sin(radians);
+
+  return {
+    x: x * cos - y * sin,
+    y: x * sin + y * cos,
+  };
+}
+
+function toLocalDelta(x: number, y: number, degrees: number): { x: number; y: number } {
+  return rotateVector(x, y, -degrees);
 }
 
 function getLayerMetrics(layer: HTMLDivElement | null): LayerMetrics {
@@ -79,13 +99,23 @@ function BackgroundDecorations({
   isEditing,
   onDecorationDelete,
   onDecorationMove,
-  onDecorationMoveEnd,
   onDecorationResize,
-  onDecorationResizeEnd,
 }: BackgroundDecorationsProps) {
   const layerRef = useRef<HTMLDivElement>(null);
   const [dragState, setDragState] = useState<DragState | null>(null);
   const [resizeState, setResizeState] = useState<ResizeState | null>(null);
+  const [selectedDecorationId, setSelectedDecorationId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!isEditing) {
+      setSelectedDecorationId(null);
+      return;
+    }
+
+    if (selectedDecorationId && !decorations.some((decoration) => decoration.id === selectedDecorationId)) {
+      setSelectedDecorationId(null);
+    }
+  }, [decorations, isEditing, selectedDecorationId]);
 
   if (decorations.length === 0) {
     return null;
@@ -102,6 +132,7 @@ function BackgroundDecorations({
       return;
     }
 
+    setSelectedDecorationId(decoration.id);
     const layerMetrics = getLayerMetrics(layerRef.current);
     const leftPx = layerMetrics.left + layerMetrics.width / 2 + decoration.left;
     const topPx = layerMetrics.top + (decoration.top / 100) * layerMetrics.height;
@@ -152,7 +183,6 @@ function BackgroundDecorations({
     }
 
     setDragState(null);
-    onDecorationMoveEnd();
   }
 
   function handleResizePointerDown(
@@ -164,18 +194,29 @@ function BackgroundDecorations({
       return;
     }
 
-    const rect = event.currentTarget.closest<HTMLElement>('.background-decorations__frame')?.getBoundingClientRect();
     const fallbackHeight = decoration.height ?? decoration.width * 0.66;
+    const layerMetrics = getLayerMetrics(layerRef.current);
+    const startWidth = Math.max(decoration.width, MIN_DECORATION_WIDTH);
+    const startHeight = Math.max(decoration.height ?? fallbackHeight, MIN_DECORATION_HEIGHT);
+    const startTopPx = layerMetrics.top + (decoration.top / 100) * layerMetrics.height;
 
     event.preventDefault();
     event.stopPropagation();
     event.currentTarget.setPointerCapture(event.pointerId);
+    setSelectedDecorationId(decoration.id);
     setResizeState({
       handle,
       id: decoration.id,
+      layerHeight: layerMetrics.height,
+      layerLeft: layerMetrics.left,
+      layerTop: layerMetrics.top,
+      layerWidth: layerMetrics.width,
       pointerId: event.pointerId,
-      startHeight: Math.max(decoration.height ?? rect?.height ?? fallbackHeight, MIN_DECORATION_HEIGHT),
-      startWidth: Math.max(decoration.width, rect?.width ?? 0, MIN_DECORATION_WIDTH),
+      rotation: decoration.rotation,
+      startCenterX: layerMetrics.left + layerMetrics.width / 2 + decoration.left,
+      startCenterY: startTopPx + startHeight / 2,
+      startHeight,
+      startWidth,
       startX: event.clientX,
       startY: event.clientY,
     });
@@ -186,20 +227,62 @@ function BackgroundDecorations({
       return;
     }
 
-    const deltaX = event.clientX - resizeState.startX;
-    const deltaY = event.clientY - resizeState.startY;
-    const nextWidth =
-      resizeState.handle === 'right' || resizeState.handle === 'corner'
-        ? Math.max(MIN_DECORATION_WIDTH, resizeState.startWidth + deltaX)
-        : resizeState.startWidth;
-    const nextHeight =
-      resizeState.handle === 'bottom' || resizeState.handle === 'corner'
-        ? Math.max(MIN_DECORATION_HEIGHT, resizeState.startHeight + deltaY)
-        : resizeState.startHeight;
+    const delta = toLocalDelta(
+      event.clientX - resizeState.startX,
+      event.clientY - resizeState.startY,
+      resizeState.rotation,
+    );
+    const deltaX = delta.x;
+    const deltaY = delta.y;
+    const rawWidth =
+      resizeState.handle === 'top-left' || resizeState.handle === 'bottom-left'
+        ? resizeState.startWidth - deltaX
+        : resizeState.startWidth + deltaX;
+    const rawHeight =
+      resizeState.handle === 'top-left' || resizeState.handle === 'top-right'
+        ? resizeState.startHeight - deltaY
+        : resizeState.startHeight + deltaY;
+    const minScale = Math.max(
+      MIN_DECORATION_WIDTH / resizeState.startWidth,
+      MIN_DECORATION_HEIGHT / resizeState.startHeight,
+    );
+    const nextScale = Math.max(rawWidth / resizeState.startWidth, rawHeight / resizeState.startHeight, minScale);
+    const nextWidth = Math.round(resizeState.startWidth * nextScale);
+    const nextHeight = Math.round(resizeState.startHeight * nextScale);
+    const oppositeStartX =
+      resizeState.handle === 'top-left' || resizeState.handle === 'bottom-left'
+        ? resizeState.startWidth / 2
+        : -resizeState.startWidth / 2;
+    const oppositeStartY =
+      resizeState.handle === 'top-left' || resizeState.handle === 'top-right'
+        ? resizeState.startHeight / 2
+        : -resizeState.startHeight / 2;
+    const oppositeNextX =
+      resizeState.handle === 'top-left' || resizeState.handle === 'bottom-left'
+        ? nextWidth / 2
+        : -nextWidth / 2;
+    const oppositeNextY =
+      resizeState.handle === 'top-left' || resizeState.handle === 'top-right'
+        ? nextHeight / 2
+        : -nextHeight / 2;
+    const startAnchorOffset = rotateVector(oppositeStartX, oppositeStartY, resizeState.rotation);
+    const nextAnchorOffset = rotateVector(oppositeNextX, oppositeNextY, resizeState.rotation);
+    const anchorX = resizeState.startCenterX + startAnchorOffset.x;
+    const anchorY = resizeState.startCenterY + startAnchorOffset.y;
+    const nextCenterX = anchorX - nextAnchorOffset.x;
+    const nextCenterY = anchorY - nextAnchorOffset.y;
+    const nextTopEdge = nextCenterY - nextHeight / 2;
+    const nextLeft = Math.round(nextCenterX - resizeState.layerLeft - resizeState.layerWidth / 2);
+    const nextTop = Number((((nextTopEdge - resizeState.layerTop) / resizeState.layerHeight) * 100).toFixed(2));
 
     event.preventDefault();
     event.stopPropagation();
-    onDecorationResize(decoration.id, Math.round(nextWidth), Math.round(nextHeight));
+    onDecorationResize(decoration.id, {
+      height: nextHeight,
+      left: nextLeft,
+      top: nextTop,
+      width: nextWidth,
+    });
   }
 
   function handleResizePointerEnd(event: React.PointerEvent<HTMLButtonElement>): void {
@@ -214,7 +297,6 @@ function BackgroundDecorations({
     event.preventDefault();
     event.stopPropagation();
     setResizeState(null);
-    onDecorationResizeEnd();
   }
 
   return (
@@ -226,6 +308,8 @@ function BackgroundDecorations({
       {decorations.map((decoration) => {
         const isDragging = dragState?.id === decoration.id;
         const isResizing = resizeState?.id === decoration.id;
+        const isSelected = selectedDecorationId === decoration.id;
+        const showControls = isEditing && (isSelected || isDragging || isResizing);
 
         return (
           <div
@@ -233,6 +317,8 @@ function BackgroundDecorations({
             className={`background-decorations__item${isEditing ? ' background-decorations__item--editing' : ''}${
               isDragging ? ' background-decorations__item--dragging' : ''
             }${isResizing ? ' background-decorations__item--resizing' : ''}${
+              isSelected ? ' background-decorations__item--selected' : ''
+            }${
               decoration.height ? ' background-decorations__item--sized' : ''
             }`}
             style={{
@@ -240,7 +326,7 @@ function BackgroundDecorations({
               height: decoration.height ? `${decoration.height}px` : undefined,
               opacity: Math.max(decoration.opacity, 0.78),
               top: `${decoration.top}%`,
-              transform: `translateX(-50%) rotate(${decoration.rotation}deg)`,
+              transform: 'translateX(-50%)',
               width: `${decoration.width}px`,
             }}
             onPointerCancel={handlePointerEnd}
@@ -248,9 +334,12 @@ function BackgroundDecorations({
             onPointerMove={(event) => handlePointerMove(event, decoration)}
             onPointerUp={handlePointerEnd}
           >
-            <div className="background-decorations__frame">
+            <div
+              className="background-decorations__frame"
+              style={{ transform: `rotate(${decoration.rotation}deg)` }}
+            >
               <img className="background-decorations__image" src={decoration.src} alt="" draggable={false} />
-              {isEditing && (
+              {showControls && (
                 <>
                   <button
                     type="button"
@@ -258,45 +347,30 @@ function BackgroundDecorations({
                     aria-label={`Удалить ${decoration.name}`}
                     data-tooltip="Удалить изображение"
                     title="Удалить изображение"
-                    onClick={() => onDecorationDelete(decoration.id)}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      onDecorationDelete(decoration.id);
+                    }}
                   >
                     <X size={15} strokeWidth={2} aria-hidden="true" />
                   </button>
-                  <button
-                    type="button"
-                    className="background-decorations__resize background-decorations__resize--right has-tooltip"
-                    aria-label={`Растянуть по ширине ${decoration.name}`}
-                    data-tooltip="Растянуть по ширине"
-                    title="Растянуть по ширине"
-                    onPointerCancel={handleResizePointerEnd}
-                    onPointerDown={(event) => handleResizePointerDown(event, decoration, 'right')}
-                    onPointerMove={(event) => handleResizePointerMove(event, decoration)}
-                    onPointerUp={handleResizePointerEnd}
-                  />
-                  <button
-                    type="button"
-                    className="background-decorations__resize background-decorations__resize--bottom has-tooltip"
-                    aria-label={`Растянуть по высоте ${decoration.name}`}
-                    data-tooltip="Растянуть по высоте"
-                    title="Растянуть по высоте"
-                    onPointerCancel={handleResizePointerEnd}
-                    onPointerDown={(event) => handleResizePointerDown(event, decoration, 'bottom')}
-                    onPointerMove={(event) => handleResizePointerMove(event, decoration)}
-                    onPointerUp={handleResizePointerEnd}
-                  />
-                  <button
-                    type="button"
-                    className="background-decorations__resize background-decorations__resize--corner has-tooltip"
-                    aria-label={`Изменить размер ${decoration.name}`}
-                    data-tooltip="Изменить размер"
-                    title="Изменить размер"
-                    onPointerCancel={handleResizePointerEnd}
-                    onPointerDown={(event) => handleResizePointerDown(event, decoration, 'corner')}
-                    onPointerMove={(event) => handleResizePointerMove(event, decoration)}
-                    onPointerUp={handleResizePointerEnd}
-                  >
-                    <Maximize2 size={14} strokeWidth={2} aria-hidden="true" />
-                  </button>
+                  {(['top-left', 'top-right', 'bottom-left', 'bottom-right'] as const).map((handle) => (
+                    <button
+                      key={handle}
+                      type="button"
+                      className={`background-decorations__resize background-decorations__resize--${handle} has-tooltip`}
+                      aria-label={`Пропорционально изменить размер ${decoration.name}`}
+                      data-tooltip="Изменить размер"
+                      title="Изменить размер"
+                      onPointerCancel={handleResizePointerEnd}
+                      onPointerDown={(event) => handleResizePointerDown(event, decoration, handle)}
+                      onPointerMove={(event) => handleResizePointerMove(event, decoration)}
+                      onPointerUp={handleResizePointerEnd}
+                    />
+                  ))}
+                  <span className="background-decorations__size-label">
+                    {Math.round(decoration.width)} x {Math.round(decoration.height ?? decoration.width * 0.66)}
+                  </span>
                 </>
               )}
             </div>

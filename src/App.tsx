@@ -1,5 +1,5 @@
 import { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react';
-import { Check, Palette, Save } from 'lucide-react';
+import { Check, Palette } from 'lucide-react';
 import {
   ApiError,
   createBackupSnapshot,
@@ -20,6 +20,7 @@ import LoginScreen from './components/LoginScreen';
 import SearchBar from './components/SearchBar';
 import Toast, { ToastState } from './components/Toast';
 import WeatherBadge from './components/WeatherBadge';
+import WeatherRainEffect from './components/WeatherRainEffect';
 
 const CreateTaskModal = lazy(() => import('./components/CreateTaskModal'));
 const TaskDetailsModal = lazy(() => import('./components/TaskDetailsModal'));
@@ -119,10 +120,6 @@ function loadBackgroundDecorations(): BackgroundDecoration[] {
       : [];
     const normalizedDecorations = validDecorations.map(normalizeBackgroundDecoration);
 
-    if (validDecorations.some((decoration) => decoration.anchor !== 'center')) {
-      saveBackgroundDecorations(normalizedDecorations);
-    }
-
     return normalizedDecorations;
   } catch {
     return [];
@@ -142,6 +139,21 @@ function saveBackgroundDecorations(decorations: BackgroundDecoration[]): boolean
     console.error('[MONDAY] Failed to persist background decorations:', error);
     return false;
   }
+}
+
+function ColumnsGapIcon({ size = 16 }: { size?: number }) {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width={size}
+      height={size}
+      fill="currentColor"
+      viewBox="0 0 16 16"
+      aria-hidden="true"
+    >
+      <path d="M6 1v3H1V1zM1 0a1 1 0 0 0-1 1v3a1 1 0 0 0 1 1h5a1 1 0 0 0 1-1V1a1 1 0 0 0-1-1zm14 12v3h-5v-3zm-5-1a1 1 0 0 0-1 1v3a1 1 0 0 0 1 1h5a1 1 0 0 0 1-1v-3a1 1 0 0 0-1-1zM6 8v7H1V8zM1 7a1 1 0 0 0-1 1v7a1 1 0 0 0 1 1h5a1 1 0 0 0 1-1V8a1 1 0 0 0-1-1zm14-6v7h-5V1zm-5-1a1 1 0 0 0-1 1v7a1 1 0 0 0 1 1h5a1 1 0 0 0 1-1V1a1 1 0 0 0-1-1z" />
+    </svg>
+  );
 }
 
 function readFileAsDataUrl(file: File): Promise<string> {
@@ -390,6 +402,7 @@ function App() {
   const [isBackgroundSaveConfirmed, setIsBackgroundSaveConfirmed] = useState(false);
   const [isBackgroundDragActive, setIsBackgroundDragActive] = useState(false);
   const [isRainyWeather, setIsRainyWeather] = useState(false);
+  const [rainOverride, setRainOverride] = useState<boolean | null>(null);
   const latestTasksRef = useRef(tasks);
   const latestCategoriesRef = useRef(categories);
   const backgroundDecorationsRef = useRef(backgroundDecorations);
@@ -456,19 +469,16 @@ function App() {
 
     const nextState = [...currentDecorations, ...nextDecorations].slice(0, MAX_BACKGROUND_DECORATIONS);
 
-    if (!saveBackgroundDecorations(nextState)) {
-      setToast({
-        id: Date.now(),
-        message: 'Не удалось сохранить фон: хранилище браузера заполнено',
-      });
-      return;
-    }
-
     backgroundDecorationsRef.current = nextState;
     setBackgroundDecorations(nextState);
+    setIsBackgroundEditMode(true);
+    setIsBackgroundSaveConfirmed(false);
     setToast({
       id: Date.now(),
-      message: nextDecorations.length === 1 ? 'Изображение добавлено на фон' : 'Изображения добавлены на фон',
+      message:
+        nextDecorations.length === 1
+          ? 'Изображение добавлено в черновик фона'
+          : 'Изображения добавлены в черновик фона',
     });
   }
 
@@ -531,33 +541,27 @@ function App() {
     setBackgroundDecorations(nextState);
   }
 
-  function resizeBackgroundDecoration(decorationId: string, width: number, height: number): void {
+  function resizeBackgroundDecoration(
+    decorationId: string,
+    nextDecoration: Pick<BackgroundDecoration, 'height' | 'left' | 'top' | 'width'>,
+  ): void {
     const nextState = backgroundDecorationsRef.current.map((decoration) =>
-      decoration.id === decorationId ? { ...decoration, width, height } : decoration,
+      decoration.id === decorationId ? { ...decoration, ...nextDecoration } : decoration,
     );
 
     backgroundDecorationsRef.current = nextState;
     setBackgroundDecorations(nextState);
   }
 
-  function commitBackgroundDecorationMove(): void {
-    saveBackgroundDecorationState('Не удалось сохранить положение фона');
-  }
-
   function deleteBackgroundDecoration(decorationId: string): void {
     const nextState = backgroundDecorationsRef.current.filter((decoration) => decoration.id !== decorationId);
 
     backgroundDecorationsRef.current = nextState;
-    saveBackgroundDecorations(nextState);
     setBackgroundDecorations(nextState);
-
-    if (nextState.length === 0) {
-      setIsBackgroundEditMode(false);
-    }
 
     setToast({
       id: Date.now(),
-      message: 'Изображение удалено с фона',
+      message: 'Изображение удалено из черновика фона',
     });
   }
 
@@ -1614,6 +1618,12 @@ function App() {
     }
   }
 
+  const isRainVisible = rainOverride ?? isRainyWeather;
+
+  function toggleRainOverride(): void {
+    setRainOverride(!isRainVisible);
+  }
+
   if (authStatus !== 'authenticated') {
     return <LoginScreen error={authError} isLoading={authStatus === 'loading'} isSubmitting={isAuthSubmitting} onLogin={handleLogin} />;
   }
@@ -1622,7 +1632,7 @@ function App() {
     <div
       className={`app${isBackgroundDragActive ? ' app--background-dragging' : ''}${
         isBackgroundEditMode ? ' app--background-editing' : ''
-      }${isRainyWeather ? ' app--weather-rain' : ''}`}
+      }${isRainVisible ? ' app--weather-rain' : ''}`}
       onDragEnter={handleBackgroundDragEnter}
       onDragLeave={handleBackgroundDragLeave}
       onDragOver={handleBackgroundDragOver}
@@ -1633,16 +1643,28 @@ function App() {
         isEditing={isBackgroundEditMode}
         onDecorationDelete={deleteBackgroundDecoration}
         onDecorationMove={moveBackgroundDecoration}
-        onDecorationMoveEnd={commitBackgroundDecorationMove}
         onDecorationResize={resizeBackgroundDecoration}
-        onDecorationResizeEnd={commitBackgroundDecorationMove}
       />
-      {isRainyWeather && <div className="weather-rain" aria-hidden="true" />}
+      {isRainVisible && <WeatherRainEffect />}
       <aside className="weather-widget" aria-label="Погода">
         <WeatherBadge onRainChange={setIsRainyWeather} />
+        <button
+          type="button"
+          role="switch"
+          aria-checked={isRainVisible}
+          className={`weather-rain-toggle has-tooltip${isRainVisible ? ' weather-rain-toggle--active' : ''}`}
+          data-tooltip={isRainVisible ? 'Выключить live-дождь' : 'Включить live-дождь'}
+          title={isRainVisible ? 'Выключить live-дождь' : 'Включить live-дождь'}
+          onClick={toggleRainOverride}
+        >
+          <span className="weather-rain-toggle__label">live</span>
+          <span className="weather-rain-toggle__track" aria-hidden="true">
+            <span className="weather-rain-toggle__thumb" />
+          </span>
+        </button>
       </aside>
       {isBackgroundDragActive && <div className="background-drop-hint">Отпустите изображение на фон</div>}
-      {backgroundDecorations.length > 0 && (
+      {(backgroundDecorations.length > 0 || isBackgroundEditMode) && (
         <aside className="background-toolbar" aria-label="Управление фоном">
           <button
             type="button"
@@ -1670,7 +1692,7 @@ function App() {
             {isBackgroundSaveConfirmed ? (
               <Check size={18} strokeWidth={2.3} aria-hidden="true" />
             ) : isBackgroundEditMode ? (
-              <Save size={18} strokeWidth={1.9} aria-hidden="true" />
+              <ColumnsGapIcon size={18} />
             ) : (
               <Palette size={18} strokeWidth={1.9} aria-hidden="true" />
             )}

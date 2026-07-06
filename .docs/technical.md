@@ -6,7 +6,7 @@
 - Владелец: команда проекта
 - Последнее обновление: 2026-07-06
 - Стадия проекта: `POC B`
-- Версия проекта: `v0.1.21`
+- Версия проекта: `v0.1.26`
 - Предыдущая версия: `не применимо`
 - Следующий целевой этап: `MVP A`
 - Архив финальной версии предыдущего этапа: `не применимо, каноническая пара документов вводится впервые`
@@ -74,7 +74,7 @@
 - `Deadline`: дедлайн задачи (`none`, `date`, `range`, `recurring`; weekly recurring использует `mode=week` и `weekday`).
 - `BackgroundDecoration`: локальная браузерная настройка фонового изображения с позицией на page-sized background layer и горизонтальным anchor от центра; не входит в серверный snapshot.
 - `WeatherPreference`: локальная браузерная настройка выбранного id города для floating-погодного виджета.
-- `WeatherRainLayer`: client-only CSS overlay лёгкого дождя, включаемый погодным виджетом.
+- `WeatherRainLayer`: client-only canvas overlay дождя, включаемый погодным виджетом.
 - `ServerTasksState`: серверный снимок доски с `tasks`, `categories`, `updatedAt` и `version`.
 - `task_backups`: таблица резервных снимков с привязкой к пользователю-инициатору.
 - auth headers от reverse proxy: источник текущего identity context для API.
@@ -98,8 +98,10 @@
 - Docker Compose для локального и production-подъема
 - Caddy как reverse proxy в production
 - Authentik + PostgreSQL как внешний auth-layer
-- Open-Meteo Forecast API как внешний клиентский источник погоды без API-ключа
+- Open-Meteo Forecast API как внешний серверный источник погоды без API-ключа
 - локальные Yandex Weather light SVG icons в `public/weather-icons`
+- локальные SVG-флаги стран в `public/flags` для weather city picker
+- локальный vendor `public/vendor/raindrop-fx/index.js` для canvas-анимации дождя
 
 ### 3.2. Основные модули и их ответственность
 
@@ -147,24 +149,34 @@
 - Background decorations:
   - UI принимает image-файлы через page-level drag&drop без header-кнопки загрузки
   - клиент сжимает изображения для локального хранения, кроме GIF
-  - настройки пишутся в `localStorage` отдельно от task snapshot
+  - настройки пишутся в `localStorage` отдельно от task snapshot только после явной кнопки сохранения фона
   - слой фона рендерится за доской как page-sized слой и прокручивается вместе со страницей без parallax-offset от pointer
   - отдельная floating-панель вне `app__inner` включает background edit-mode
   - в background edit-mode кнопка редактирования заменяется кнопкой сохранения изменений и выхода
-  - отдельный edit-mode поднимает слой над доской, включает pointer-drag изображений, edge/corner resize handles и кнопки удаления в правом верхнем углу самой картинки
-  - новые координаты и размер сохраняются в `localStorage` после завершения pointer-drag, resize или при явном выходе из edit-mode
+  - изменения background edit-mode живут в `backgroundDecorations` state/ref как черновик; `saveBackgroundDecorations` вызывается только при явном save-and-exit
+  - отдельный edit-mode поднимает слой над доской, включает pointer-drag изображений и click-selection конкретной картинки
+  - выбранная картинка получает синюю selection-рамку, кнопку удаления, четыре corner resize handles и size-label
+  - corner resize меняет `width`, `height`, `left` и `top` пропорционально, сохраняя aspect ratio и противоположный угол как якорь
   - горизонтальная координата хранится как pixel offset от центра фонового слоя; старые процентные `left` без `anchor` мигрируются при чтении из `localStorage`
   - секции категорий используют CSS liquid glass-подложку (`backdrop-filter`, прозрачный фон, блики и граница) с минимальной белой заливкой для читаемости поверх фоновых изображений
 - Weather:
   - floating weather badge рендерится вне `app__inner` в левом верхнем углу
   - выбранный город хранится в `localStorage` по ключу `monday:weather-city` как id из локального списка
-  - пользователь выбирает город через стилизованный native select, ручной ввод названия не используется
+  - пользователь выбирает город через стилизованный listbox, ручной ввод названия не используется
   - локальный список городов включает `tbilisi`
+  - каждая city option содержит `countryCode`, который мапится на локальный SVG-флаг `public/flags/{countryCode}.svg`
   - координаты города берутся из клиентского списка, без Open-Meteo Geocoding API
-  - клиент напрямую вызывает `https://api.open-meteo.com/v1/forecast` для `current=temperature_2m,weather_code,is_day,precipitation,rain,showers`
+  - клиент вызывает same-origin endpoint `GET /api/weather/current?latitude=...&longitude=...`
+  - API валидирует координаты и через `server/src/weather.ts` вызывает Open-Meteo Forecast для `current=temperature_2m,weather_code,is_day,precipitation`
+  - серверный вызов Open-Meteo подключается к `OPEN_METEO_CONNECT_HOST` с дефолтом `open-meteo.com`, сохраняя SNI/Host `api.open-meteo.com`; это обходит локальный DNS/TLS-перехват, когда `api.open-meteo.com` резолвится в `198.18.0.0/15`
+  - запрос погоды прерывается через 8 секунд, чтобы UI не зависал в состоянии загрузки
   - `weather_code` и `is_day` мапятся на коды Yandex Weather icon set (`skc_d`, `bkn_ra_n`, `ovc_ts` и т.п.)
   - итоговая иконка загружается как локальный SVG из `public/weather-icons/{iconCode}.svg` через `withAppBasePath`
-  - rain-layer включается, если `rain`, `showers` или `precipitation` больше нуля либо WMO `weather_code` относится к drizzle/rain/showers/thunderstorm
+  - флаги городов загружаются как локальные SVG из `public/flags/{countryCode}.svg` через `withAppBasePath`; emoji-флаги не используются
+  - rain-layer включается, если `precipitation` больше нуля либо WMO `weather_code` относится к drizzle/rain/showers/thunderstorm
+  - App хранит `rainOverride: boolean | null`: `null` означает автоматическое состояние от прогноза, boolean вручную включает или выключает rain-layer через слайдер
+  - rain-layer рендерится компонентом `WeatherRainEffect` как fixed canvas overlay: сначала загружается локальный `/vendor/raindrop-fx/index.js`, при ошибке запускается внутренняя canvas-анимация падающих капель
+  - старый CSS/image-паттерн дождя не используется, чтобы дождливое состояние выглядело как живая анимация
   - ошибки погоды не блокируют доску и отображаются только как fallback в weather badge
 - Hosted auth:
   - reverse proxy передает identity headers
@@ -192,6 +204,8 @@
   - frontend contracts
 - `src/components/BackgroundDecorations.tsx`
   - статический декоративный фоновый слой, pointer-drag и удаление локальных изображений
+- `src/components/WeatherRainEffect.tsx`
+  - canvas-анимация дождя поверх доски с локальным `raindrop-fx` vendor и canvas fallback
 - `server/src/index.ts`
   - routing, health endpoints, auth gating, rate limiters, error handling
 - `server/src/db.ts`
@@ -254,7 +268,7 @@
   - хранится в `localStorage` по ключу `monday:background-decorations`
   - `anchor='center'` означает, что `left` является пиксельным смещением центра изображения от середины фонового слоя
   - `top` остается процентной координатой изображения внутри page-sized background layer
-  - `width` и опциональный `height` меняются через edge/corner resize handles фонового изображения в background edit-mode
+  - `width` и опциональный `height` меняются через corner resize handles выбранного фонового изображения в background edit-mode без нарушения пропорций
   - ограничивается шестью изображениями и не сериализуется в `tasks_json`
 - frontend `WeatherPreference`:
   - id выбранного города из локального списка хранится в `localStorage` по ключу `monday:weather-city`
@@ -291,8 +305,8 @@
 - `PUT /api/tasks` использует optimistic concurrency и не делает merge при несовпадении версии
 - backup снимок не дублируется, если последняя сохраненная версия для пользователя уже совпадает с текущей
 - фоновые декорации не являются частью API-контракта и не должны попадать в `PUT /api/tasks`
-- погодный виджет не является частью API MONDAY; внешние forecast-запросы идут из браузера напрямую в Open-Meteo, а SVG-иконки отдаются как локальные static assets приложения
-- hosted CSP должен разрешать `connect-src https://api.open-meteo.com`; погодные SVG остаются в `img-src 'self'`
+- погодный виджет не является частью snapshot API MONDAY; браузер ходит только в same-origin `/api/weather/current`, внешний forecast-запрос выполняет API-сервер, а SVG-иконки и SVG-флаги отдаются как локальные static assets приложения
+- hosted CSP держит `connect-src 'self'`; погодные SVG и SVG-флаги остаются в `img-src 'self'`
 
 ## 6. Окружения и конфигурация
 
@@ -374,7 +388,7 @@
 ### 8.2. Ручная проверка
 
 - локальный сценарий доски: создание, редактирование, перемещение, архив, восстановление
-- локальная персонализация фона: file drag&drop, page-sized scroll layer, floating-toolbar вне `app__inner`, насыщенный рендер изображений, hover-акцент, edit-mode drag, resize, удаление, прозрачные glass-подложки категорий
+- локальная персонализация фона: file drag&drop, page-sized scroll layer, floating-toolbar вне `app__inner`, насыщенный рендер изображений, hover-акцент, черновой edit-mode, selected-image outline, пропорциональный corner resize, удаление, прозрачные glass-подложки категорий
 - сценарий синхронизации: проверка статусов `syncing`, `offline`, `conflict`
 - сценарий backup: ручной запуск и повторный вызов без новой версии
 - hosted-сценарий: auth redirect и smoke path
@@ -459,8 +473,10 @@
   - убедиться, что inline-редактирование заголовка в строке не появляется, длинное название занимает не больше 90% строки и обрезается с троеточием
   - убедиться, что в header нет кнопок управления фоном и identity-строки пользователя
   - перетащить image-файл на страницу и убедиться, что он появился за доской, выглядит не блекло, а drag&drop задач после этого не сломан
-  - включить режим редактирования фона через floating-панель вне центральной колонки, убедиться, что кнопка редактирования стала кнопкой сохранения, перетащить изображение в другую область и растянуть его за правый край, нижний край и угол
-  - убедиться, что позиция, ширина и высота изображения сохранились, а hover вне зон категорий слегка повышает яркость/контраст
+  - включить режим редактирования фона через floating-панель вне центральной колонки, убедиться, что кнопка редактирования стала кнопкой сохранения, кликнуть изображение и увидеть синюю рамку, кнопку удаления, угловые resize-точки и label размера
+  - перетащить изображение в другую область и растянуть его за разные углы, убедившись, что пропорции не меняются
+  - обновить страницу до сохранения и убедиться, что черновые изменения фона не применились к `localStorage`
+  - повторить изменение и нажать кнопку сохранения фона, убедиться, что позиция, ширина и высота изображения сохранились после reload, а hover вне зон категорий слегка повышает яркость/контраст
   - изменить ширину окна и убедиться, что изображение остается примерно в том же месте относительно центра доски
   - удалить одно изображение кнопкой в правом верхнем углу самой картинки
   - прокрутить страницу и убедиться, что фоновые изображения прокручиваются вместе с ней и не получают parallax-смещения от движения указателя
@@ -596,9 +612,9 @@
 - Контекст:
   - фоновая декорация нужна как персональная настройка интерфейса, а не как часть данных доски.
 - Решение:
-  - изображения хранятся в браузерном `localStorage` по отдельному ключу и рендерятся отдельным статическим компонентом за доской; перемещение и удаление доступны только в background edit-mode, а читаемость доски обеспечивается glass-подложками категорий.
+  - изображения хранятся в браузерном `localStorage` по отдельному ключу и рендерятся отдельным статическим компонентом за доской; перемещение, удаление и пропорциональное масштабирование доступны только в background edit-mode и сохраняются в storage только после save-and-exit, а читаемость доски обеспечивается glass-подложками категорий.
 - Последствия:
-  - API, SQLite schema, backup retention и optimistic concurrency остаются без изменений; фон не синхронизируется между устройствами, а частые pointermove не пишут большие data URL в storage до завершения drag.
+  - API, SQLite schema, backup retention и optimistic concurrency остаются без изменений; фон не синхронизируется между устройствами, а pointermove/delete/resize не пишут в storage до явного сохранения режима редактирования.
 - Связанные планы и требования:
   - `REQ-009`, `PD-005`
 
@@ -614,15 +630,15 @@
 - Связанные планы и требования:
   - `REQ-001`, `REQ-004`, `TD-001`
 
-### TD-007. Погода как client-only интеграция
+### TD-007. Погода через same-origin connector
 
 - Статус: approved
 - Контекст:
   - пользователю нужна температура дня в отдельном floating badge, но проект не должен добавлять серверные секреты или усложнять API ради вспомогательного UI-виджета.
 - Решение:
-  - использовать Open-Meteo Forecast напрямую из браузера: координаты брать из локального списка городов, forecast `current=temperature_2m,weather_code,is_day,precipitation,rain,showers` использовать для температуры, локальной Yandex light-иконки и rain-overlay; выбранный город хранить в `localStorage`.
+  - использовать Open-Meteo Forecast через same-origin endpoint MONDAY: координаты брать из локального списка городов, forecast `current=temperature_2m,weather_code,is_day,precipitation` использовать для температуры, локальной Yandex light-иконки и canvas rain-overlay; выбранный город хранить в `localStorage`, а флаги городов показывать через локальные SVG assets.
 - Последствия:
-  - сервер MONDAY, SQLite snapshot и backup не меняются; доступность погодных данных и rain-overlay зависит от внешнего Open-Meteo, а weather icons остаются локальными static assets.
+  - SQLite snapshot и backup не меняются; доступность погодных данных зависит от внешнего Open-Meteo и сетевого доступа API-сервера, а weather icons, флаги и `raindrop-fx` остаются локальными static assets.
 - Связанные планы и требования:
   - `REQ-010`
 
@@ -652,3 +668,8 @@
 - `2026-07-06 | v0.1.19 | тип: UX+assets | важность: важно в документации | WeatherBadge загружает SVG-иконки из public/weather-icons через app base path, production CSP больше не разрешает внешний image-host Yandex`
 - `2026-07-06 | v0.1.20 | тип: UX+assets | важность: важно в документации | добавлен AppleEmojiText и локальный public/emoji/apple/1f30a.png для одинакового отображения 🌊 без системного Apple Color Emoji`
 - `2026-07-06 | v0.1.21 | тип: UX+assets | важность: важно в документации | AppleEmojiText, public/emoji/apple, emoji font stack и countryEmoji в WeatherBadge удалены`
+- `2026-07-06 | v0.1.22 | тип: UX+integration | важность: важно в документации | WeatherBadge использует Open-Meteo current forecast без rain/showers, abort-timeout и локальные SVG-флаги стран вместо emoji`
+- `2026-07-06 | v0.1.23 | тип: UX+integration | важность: важно в документации | добавлен /api/weather/current и серверный Open-Meteo connector с OPEN_METEO_CONNECT_HOST для обхода локального DNS/TLS-перехвата`
+- `2026-07-06 | v0.1.24 | тип: UX | важность: важно в документации | background edit-mode хранит черновик до save-and-exit, selected-image controls показывают синюю рамку и corner handles с пропорциональным resize`
+- `2026-07-06 | v0.1.25 | тип: UX+assets | важность: важно в документации | WeatherRainEffect заменил CSS/image rain-layer на canvas-анимацию с локальным public/vendor/raindrop-fx и fallback canvas rain`
+- `2026-07-06 | v0.1.26 | тип: UX | важность: важно в документации | App получил rainOverride и glass switch для ручного включения/выключения WeatherRainEffect поверх автоматического прогноза`

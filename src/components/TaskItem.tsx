@@ -306,12 +306,12 @@ function TaskItem({
       <div className="task-card__headline">
         <div className="task-card__title-cluster" onClick={handleTitleClusterClick}>
           {task.pinned && <Pin className="task-card__pin-icon" size={12} strokeWidth={2.2} aria-label="Закреплено" />}
-          {task.urgent && <span className="task-card__badge task-card__badge--urgent">СРОЧНО</span>}
 
-          <span className="task-card__title-shell task-card__title-shell--tooltip" data-full-title={task.title}>
+          <span className={`task-card__title-shell${task.urgent ? ' task-card__title-shell--with-inline-badge' : ''}`}>
             <span className="task-card__title">
               {task.title}
             </span>
+            {task.urgent && <span className="task-card__badge task-card__badge--urgent">срочно</span>}
           </span>
         </div>
 

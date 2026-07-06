@@ -14,6 +14,7 @@ import {
 } from './auth.js';
 import { attachRequestId, createRateLimiter, requestLogger, securityHeaders } from './http.js';
 import { ValidationError, parseLoginPayload, parseTasksPayload } from './schema.js';
+import { fetchOpenMeteoCurrent } from './weather.js';
 
 const app = express();
 const port = Number(process.env.PORT ?? 3001);
@@ -75,6 +76,12 @@ const healthLimiter = createRateLimiter({
   limit: 240,
 });
 
+const weatherLimiter = createRateLimiter({
+  name: 'weather',
+  windowMs: 60_000,
+  limit: 60,
+});
+
 function getBackupOwner(request: Request) {
   return {
     key: request.authContext.username ?? 'anonymous',
@@ -103,6 +110,20 @@ function parseBackupSource(value: unknown): 'auto' | 'manual' {
   }
 
   throw new ValidationError('source must be "auto" or "manual"');
+}
+
+function parseCoordinate(value: unknown, field: string, minimum: number, maximum: number): number {
+  if (typeof value !== 'string' || !value.trim()) {
+    throw new ValidationError(`${field} is required`);
+  }
+
+  const parsed = Number(value);
+
+  if (!Number.isFinite(parsed) || parsed < minimum || parsed > maximum) {
+    throw new ValidationError(`${field} must be a number between ${minimum} and ${maximum}`);
+  }
+
+  return parsed;
 }
 
 router.get('/api/health/live', healthLimiter, (_request, response) => {
@@ -169,6 +190,15 @@ router.get('/api/me', readLimiter, (request, response) => {
 
 router.get('/api/tasks', readLimiter, (_request, response) => {
   response.json(getTasksState());
+});
+
+router.get('/api/weather/current', weatherLimiter, (request, response, next) => {
+  const latitude = parseCoordinate(request.query.latitude, 'latitude', -90, 90);
+  const longitude = parseCoordinate(request.query.longitude, 'longitude', -180, 180);
+
+  fetchOpenMeteoCurrent(latitude, longitude)
+    .then((payload) => response.json(payload))
+    .catch(next);
 });
 
 router.put('/api/tasks', writeLimiter, (request, response) => {
