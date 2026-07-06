@@ -1,4 +1,5 @@
 import { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react';
+import { ImageOff, Palette, Save } from 'lucide-react';
 import {
   ApiError,
   createBackupSnapshot,
@@ -14,18 +15,20 @@ import ArchiveList from './components/ArchiveList';
 import BackgroundDecorations, { type BackgroundDecoration } from './components/BackgroundDecorations';
 import CategorySection from './components/CategorySection';
 import Header from './components/Header';
+import InlineCreator from './components/InlineCreator';
 import LoginScreen from './components/LoginScreen';
 import SearchBar from './components/SearchBar';
 import Toast, { ToastState } from './components/Toast';
 
 const CreateTaskModal = lazy(() => import('./components/CreateTaskModal'));
 const TaskDetailsModal = lazy(() => import('./components/TaskDetailsModal'));
-import { loadLocalState, sanitizeTasks, saveLocalState, serializeTasks } from './storage';
+import { loadLocalState, sanitizeCategories, sanitizeTasks, saveLocalState, serializeBoardState } from './storage';
 import { triggerHaptic } from './utils/haptic';
 import type {
   BackupSnapshotResponse,
   BackupSource,
   Category,
+  CategoryOption,
   CurrentUser,
   Deadline,
   Screen,
@@ -33,7 +36,13 @@ import type {
   SyncStatus,
   Task,
 } from './types';
-import { CATEGORIES } from './types';
+import {
+  CATEGORIES,
+  CATEGORY_COLOR_PALETTE,
+  MAX_CATEGORIES,
+  MAX_CATEGORY_KEY_LENGTH,
+  MAX_CATEGORY_LABEL_LENGTH,
+} from './types';
 import { compareIsoDates } from './utils/dates';
 
 const AUTO_BACKUP_INTERVAL_MS = 5 * 60_000;
@@ -58,6 +67,7 @@ function isBackgroundDecoration(value: unknown): value is BackgroundDecoration {
   const decoration = value as Partial<BackgroundDecoration>;
 
   return (
+    (decoration.anchor === undefined || decoration.anchor === 'center') &&
     typeof decoration.id === 'string' &&
     typeof decoration.name === 'string' &&
     typeof decoration.src === 'string' &&
@@ -70,6 +80,21 @@ function isBackgroundDecoration(value: unknown): value is BackgroundDecoration {
   );
 }
 
+function normalizeBackgroundDecoration(decoration: BackgroundDecoration): BackgroundDecoration {
+  if (decoration.anchor === 'center') {
+    return decoration;
+  }
+
+  const referenceWidth = Math.max(window.innerWidth, 1);
+  const legacyLeftPx = (decoration.left / 100) * referenceWidth;
+
+  return {
+    ...decoration,
+    anchor: 'center',
+    left: Math.round(legacyLeftPx + decoration.width / 2 - referenceWidth / 2),
+  };
+}
+
 function loadBackgroundDecorations(): BackgroundDecoration[] {
   const raw = window.localStorage.getItem(BACKGROUND_DECORATIONS_STORAGE_KEY);
 
@@ -79,7 +104,16 @@ function loadBackgroundDecorations(): BackgroundDecoration[] {
 
   try {
     const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed.filter(isBackgroundDecoration).slice(0, MAX_BACKGROUND_DECORATIONS) : [];
+    const validDecorations = Array.isArray(parsed)
+      ? parsed.filter(isBackgroundDecoration).slice(0, MAX_BACKGROUND_DECORATIONS)
+      : [];
+    const normalizedDecorations = validDecorations.map(normalizeBackgroundDecoration);
+
+    if (validDecorations.some((decoration) => decoration.anchor !== 'center')) {
+      saveBackgroundDecorations(normalizedDecorations);
+    }
+
+    return normalizedDecorations;
   } catch {
     return [];
   }
@@ -150,18 +184,26 @@ async function prepareBackgroundImage(file: File): Promise<string> {
   return canvas.toDataURL('image/webp', 0.82);
 }
 
+function clampNumber(value: number, min: number, max: number): number {
+  return Math.min(Math.max(value, min), max);
+}
+
 function createBackgroundDecoration(file: File, src: string, index: number): BackgroundDecoration {
   const column = index % 3;
   const row = Math.floor(index / 3) % 2;
+  const width = 180 + (index % 3) * 46;
+  const maxCenterOffset = Math.max(0, Math.min(360, (window.innerWidth - width) / 2 - 16));
+  const preferredCenterOffset = [-360, 280, -120][column] ?? 0;
 
   return {
+    anchor: 'center',
     id: crypto.randomUUID(),
     name: file.name,
     src,
-    left: [8, 66, 28][column] ?? 12,
+    left: Math.round(clampNumber(preferredCenterOffset, -maxCenterOffset, maxCenterOffset)),
     top: [10, 54][row] ?? 18,
-    width: 180 + (index % 3) * 46,
-    opacity: 0.2,
+    width,
+    opacity: 0.82,
     rotation: [-5, 4, -2, 6, -4, 3][index % 6] ?? 0,
     depth: 0.45 + (index % 4) * 0.18,
   };
@@ -234,13 +276,13 @@ function formatBackupTooltip(result: BackupSnapshotResponse): string {
 
 function shouldPreserveLocalSnapshot(params: {
   lastSyncedJson: string | null;
+  localHasChanges: boolean;
   localJson: string;
-  localTasksCount: number;
   serverJson: string;
 }): boolean {
-  const { lastSyncedJson, localJson, localTasksCount, serverJson } = params;
+  const { lastSyncedJson, localHasChanges, localJson, serverJson } = params;
 
-  if (localTasksCount === 0 || localJson === serverJson) {
+  if (!localHasChanges || localJson === serverJson) {
     return false;
   }
 
@@ -249,6 +291,36 @@ function shouldPreserveLocalSnapshot(params: {
   }
 
   return localJson !== lastSyncedJson;
+}
+
+function getDefaultBoardJson(): string {
+  return serializeBoardState([], CATEGORIES);
+}
+
+function createCategoryKey(label: string, categories: CategoryOption[]): Category {
+  const base =
+    label
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 36) || 'category';
+  const existingKeys = new Set(categories.map((category) => category.key));
+
+  if (!existingKeys.has(base)) {
+    return base;
+  }
+
+  let suffix = 2;
+  while (existingKeys.has(`${base}-${suffix}`) && `${base}-${suffix}`.length <= MAX_CATEGORY_KEY_LENGTH) {
+    suffix += 1;
+  }
+
+  return `${base}-${suffix}`;
+}
+
+function getNextCategoryColor(index: number): string {
+  return CATEGORY_COLOR_PALETTE[index % CATEGORY_COLOR_PALETTE.length];
 }
 
 function App() {
@@ -263,6 +335,7 @@ function App() {
   const [authError, setAuthError] = useState<string | null>(null);
   const [authStatus, setAuthStatus] = useState<AuthStatus>('loading');
   const [tasks, setTasks] = useState<Task[]>(() => initialState.tasks);
+  const [categories, setCategories] = useState<CategoryOption[]>(() => initialState.categories);
   const [serverVersion, setServerVersion] = useState<number | null>(() => initialState.version);
   const [serverUpdatedAt, setServerUpdatedAt] = useState<string | null>(() => initialState.updatedAt);
   const [screen, setScreen] = useState<Screen>(() => getScreenFromPath(window.location.pathname));
@@ -286,9 +359,11 @@ function App() {
   const [backgroundDecorations, setBackgroundDecorations] = useState<BackgroundDecoration[]>(() =>
     loadBackgroundDecorations(),
   );
+  const [isBackgroundEditMode, setIsBackgroundEditMode] = useState(false);
   const [isBackgroundDragActive, setIsBackgroundDragActive] = useState(false);
-  const [parallaxState, setParallaxState] = useState({ pointerX: 0, pointerY: 0, scrollY: window.scrollY });
   const latestTasksRef = useRef(tasks);
+  const latestCategoriesRef = useRef(categories);
+  const backgroundDecorationsRef = useRef(backgroundDecorations);
   const serverVersionRef = useRef(serverVersion);
   const syncStatusRef = useRef<SyncStatus>(syncStatus);
   const conflictStateRef = useRef<ServerTasksState | null>(conflictState);
@@ -302,7 +377,8 @@ function App() {
   const backupRunnerRef = useRef<(source: BackupSource) => void>(() => undefined);
 
   async function addBackgroundFiles(files: FileList): Promise<void> {
-    const availableSlots = MAX_BACKGROUND_DECORATIONS - backgroundDecorations.length;
+    const currentDecorations = backgroundDecorationsRef.current;
+    const availableSlots = MAX_BACKGROUND_DECORATIONS - currentDecorations.length;
 
     if (availableSlots <= 0) {
       setToast({
@@ -333,7 +409,7 @@ function App() {
           throw new Error('Prepared image is too large for localStorage');
         }
 
-        return createBackgroundDecoration(file, src, backgroundDecorations.length + index);
+        return createBackgroundDecoration(file, src, currentDecorations.length + index);
       }),
     );
     const nextDecorations = prepared
@@ -348,7 +424,7 @@ function App() {
       return;
     }
 
-    const nextState = [...backgroundDecorations, ...nextDecorations].slice(0, MAX_BACKGROUND_DECORATIONS);
+    const nextState = [...currentDecorations, ...nextDecorations].slice(0, MAX_BACKGROUND_DECORATIONS);
 
     if (!saveBackgroundDecorations(nextState)) {
       setToast({
@@ -358,6 +434,7 @@ function App() {
       return;
     }
 
+    backgroundDecorationsRef.current = nextState;
     setBackgroundDecorations(nextState);
     setToast({
       id: Date.now(),
@@ -367,10 +444,87 @@ function App() {
 
   function clearBackgroundDecorations(): void {
     saveBackgroundDecorations([]);
+    backgroundDecorationsRef.current = [];
     setBackgroundDecorations([]);
+    setIsBackgroundEditMode(false);
     setToast({
       id: Date.now(),
       message: 'Фон очищен',
+    });
+  }
+
+  function startBackgroundEditMode(): void {
+    if (backgroundDecorationsRef.current.length === 0) {
+      setToast({
+        id: Date.now(),
+        message: 'Сначала добавьте изображение на фон',
+      });
+      return;
+    }
+
+    setIsBackgroundEditMode(true);
+  }
+
+  function saveBackgroundDecorationState(errorMessage = 'Не удалось сохранить изменения фона'): boolean {
+    if (!saveBackgroundDecorations(backgroundDecorationsRef.current)) {
+      setToast({
+        id: Date.now(),
+        message: errorMessage,
+      });
+      return false;
+    }
+
+    return true;
+  }
+
+  function saveAndExitBackgroundEditMode(): void {
+    if (!saveBackgroundDecorationState()) {
+      return;
+    }
+
+    setIsBackgroundEditMode(false);
+    setToast({
+      id: Date.now(),
+      message: 'Изменения фона сохранены',
+    });
+  }
+
+  function moveBackgroundDecoration(decorationId: string, left: number, top: number): void {
+    const nextState = backgroundDecorationsRef.current.map((decoration) =>
+      decoration.id === decorationId ? { ...decoration, left, top } : decoration,
+    );
+
+    backgroundDecorationsRef.current = nextState;
+    setBackgroundDecorations(nextState);
+  }
+
+  function resizeBackgroundDecoration(decorationId: string, width: number): void {
+    const nextState = backgroundDecorationsRef.current.map((decoration) =>
+      decoration.id === decorationId ? { ...decoration, width } : decoration,
+    );
+
+    backgroundDecorationsRef.current = nextState;
+    setBackgroundDecorations(nextState);
+  }
+
+  function commitBackgroundDecorationMove(): void {
+    saveBackgroundDecorationState('Не удалось сохранить положение фона');
+  }
+
+  function deleteBackgroundDecoration(decorationId: string): void {
+    const nextState = backgroundDecorationsRef.current.filter((decoration) => decoration.id !== decorationId);
+
+    backgroundDecorationsRef.current = nextState;
+    saveBackgroundDecorations(nextState);
+    setBackgroundDecorations(nextState);
+
+    if (nextState.length === 0) {
+      setIsBackgroundEditMode(false);
+    }
+
+    setToast({
+      id: Date.now(),
+      message: 'Изображение удалено с фона',
     });
   }
 
@@ -452,6 +606,10 @@ function App() {
   }, [tasks]);
 
   useEffect(() => {
+    latestCategoriesRef.current = categories;
+  }, [categories]);
+
+  useEffect(() => {
     serverVersionRef.current = serverVersion;
   }, [serverVersion]);
 
@@ -465,12 +623,13 @@ function App() {
 
   useEffect(() => {
     saveLocalState({
+      categories,
       lastSyncedJson: lastSyncedJsonRef.current,
       tasks,
       version: serverVersion,
       updatedAt: serverUpdatedAt,
     });
-  }, [serverUpdatedAt, serverVersion, tasks]);
+  }, [categories, serverUpdatedAt, serverVersion, tasks]);
 
   useEffect(() => {
     function handlePopState() {
@@ -497,53 +656,6 @@ function App() {
     },
     [],
   );
-
-  useEffect(() => {
-    let frame: number | null = null;
-    const nextParallax = {
-      pointerX: 0,
-      pointerY: 0,
-      scrollY: window.scrollY,
-    };
-
-    function commitParallax() {
-      frame = null;
-      setParallaxState({ ...nextParallax });
-    }
-
-    function scheduleParallaxUpdate() {
-      if (frame !== null) {
-        return;
-      }
-
-      frame = window.requestAnimationFrame(commitParallax);
-    }
-
-    function handleScroll() {
-      nextParallax.scrollY = window.scrollY;
-      scheduleParallaxUpdate();
-    }
-
-    function handlePointerMove(event: PointerEvent) {
-      const width = Math.max(window.innerWidth, 1);
-      const height = Math.max(window.innerHeight, 1);
-      nextParallax.pointerX = (event.clientX / width - 0.5) * 2;
-      nextParallax.pointerY = (event.clientY / height - 0.5) * 2;
-      scheduleParallaxUpdate();
-    }
-
-    window.addEventListener('scroll', handleScroll, { passive: true });
-    window.addEventListener('pointermove', handlePointerMove, { passive: true });
-
-    return () => {
-      window.removeEventListener('scroll', handleScroll);
-      window.removeEventListener('pointermove', handlePointerMove);
-
-      if (frame !== null) {
-        window.cancelAnimationFrame(frame);
-      }
-    };
-  }, []);
 
   useEffect(() => {
     let isCancelled = false;
@@ -601,12 +713,15 @@ function App() {
         }
 
         const serverTasks = sanitizeTasks(serverState.tasks);
-        const serverJson = serializeTasks(serverTasks);
+        const serverCategories = sanitizeCategories(serverState.categories, serverTasks);
+        const serverJson = serializeBoardState(serverTasks, serverCategories);
         const localTasks = latestTasksRef.current;
-        const localJson = serializeTasks(localTasks);
+        const localCategories = latestCategoriesRef.current;
+        const localJson = serializeBoardState(localTasks, localCategories);
+        const localHasChanges = localJson !== getDefaultBoardJson();
 
-        if (serverTasks.length === 0 && localTasks.length > 0) {
-          const seededState = await pushTasksToServer(localTasks, serverState.version);
+        if (serverTasks.length === 0 && localHasChanges && serverJson === getDefaultBoardJson()) {
+          const seededState = await pushTasksToServer(localTasks, localCategories, serverState.version);
 
           if (isCancelled) {
             return;
@@ -624,8 +739,8 @@ function App() {
         if (
           shouldPreserveLocalSnapshot({
             lastSyncedJson: initialState.lastSyncedJson,
+            localHasChanges,
             localJson,
-            localTasksCount: localTasks.length,
             serverJson,
           })
         ) {
@@ -639,6 +754,7 @@ function App() {
         }
 
         setTasks(serverTasks);
+        setCategories(serverCategories);
         lastSyncedJsonRef.current = serverJson;
         setServerVersion(serverState.version);
         setServerUpdatedAt(serverState.updatedAt);
@@ -688,7 +804,8 @@ function App() {
 
   async function pushLatestTasksForBackup(): Promise<void> {
     const nextTasks = latestTasksRef.current;
-    const nextJson = serializeTasks(nextTasks);
+    const nextCategories = latestCategoriesRef.current;
+    const nextJson = serializeBoardState(nextTasks, nextCategories);
 
     if (lastSyncedJsonRef.current !== null && nextJson === lastSyncedJsonRef.current) {
       return;
@@ -698,7 +815,7 @@ function App() {
     setSyncTooltip('Сохраняем изменения перед созданием резервной копии…');
 
     try {
-      const nextState = await pushTasksToServer(nextTasks, serverVersionRef.current ?? 0);
+      const nextState = await pushTasksToServer(nextTasks, nextCategories, serverVersionRef.current ?? 0);
 
       lastSyncedJsonRef.current = nextJson;
       setServerVersion(nextState.version);
@@ -750,7 +867,7 @@ function App() {
         syncStatusRef.current !== 'synced' ||
         conflictStateRef.current !== null ||
         lastBackedUpVersionRef.current === serverVersionRef.current ||
-        serializeTasks(latestTasksRef.current) !== lastSyncedJsonRef.current
+        serializeBoardState(latestTasksRef.current, latestCategoriesRef.current) !== lastSyncedJsonRef.current
       ) {
         return;
       }
@@ -776,7 +893,10 @@ function App() {
         return;
       }
 
-      if (source === 'manual' && serializeTasks(latestTasksRef.current) !== lastSyncedJsonRef.current) {
+      if (
+        source === 'manual' &&
+        serializeBoardState(latestTasksRef.current, latestCategoriesRef.current) !== lastSyncedJsonRef.current
+      ) {
         await pushLatestTasksForBackup();
       }
 
@@ -848,7 +968,7 @@ function App() {
       return;
     }
 
-    const nextJson = serializeTasks(tasks);
+    const nextJson = serializeBoardState(tasks, categories);
 
     if (lastSyncedJsonRef.current !== null && nextJson === lastSyncedJsonRef.current) {
       return;
@@ -861,7 +981,7 @@ function App() {
     const timeoutId = window.setTimeout(() => {
       void (async () => {
         try {
-          const nextState = await pushTasksToServer(tasks, serverVersionRef.current ?? 0);
+          const nextState = await pushTasksToServer(tasks, categories, serverVersionRef.current ?? 0);
 
           if (isCancelled) {
             return;
@@ -905,7 +1025,7 @@ function App() {
       isCancelled = true;
       window.clearTimeout(timeoutId);
     };
-  }, [authStatus, conflictState, tasks]);
+  }, [authStatus, categories, conflictState, tasks]);
 
   useEffect(() => {
     if (!draggedTaskId) {
@@ -1022,10 +1142,18 @@ function App() {
     [visibleTasks],
   );
   const tasksByCategory = useMemo(() => {
-    const grouped: Record<Category, Task[]> = { passion: [], routine: [], body: [], projects: [] };
+    const grouped = Object.fromEntries(categories.map((category) => [category.key, [] as Task[]])) as Record<
+      Category,
+      Task[]
+    >;
+
     for (const task of openTasks) {
+      if (!grouped[task.category]) {
+        grouped[task.category] = [];
+      }
       grouped[task.category].push(task);
     }
+
     for (const key of Object.keys(grouped) as Category[]) {
       grouped[key].sort((left, right) => {
         const leftPin = left.pinned ? 1 : 0;
@@ -1035,7 +1163,7 @@ function App() {
       });
     }
     return grouped;
-  }, [openTasks]);
+  }, [categories, openTasks]);
   const selectedTask =
     tasks.find((task) => task.id === selectedTaskId && task.status === 'open') ?? null;
   const draggedTask =
@@ -1053,11 +1181,13 @@ function App() {
     }
 
     const serverTasks = sanitizeTasks(conflictState.tasks);
+    const serverCategories = sanitizeCategories(conflictState.categories, serverTasks);
 
     setTasks(serverTasks);
+    setCategories(serverCategories);
     setServerVersion(conflictState.version);
     setServerUpdatedAt(conflictState.updatedAt);
-    lastSyncedJsonRef.current = serializeTasks(serverTasks);
+    lastSyncedJsonRef.current = serializeBoardState(serverTasks, serverCategories);
     setConflictState(null);
     setSyncStatus('synced');
     setSyncTooltip(formatSyncedTooltip(conflictState.updatedAt));
@@ -1083,6 +1213,82 @@ function App() {
     };
 
     setTasks((current) => [nextTask, ...current]);
+  }
+
+  function createCategory(label: string) {
+    const trimmed = label.trim().slice(0, MAX_CATEGORY_LABEL_LENGTH);
+
+    if (!trimmed) {
+      return;
+    }
+
+    const currentCategories = latestCategoriesRef.current;
+
+    if (currentCategories.length >= MAX_CATEGORIES) {
+      setToast({
+        id: Date.now(),
+        message: `Можно добавить максимум ${MAX_CATEGORIES} категорий`,
+      });
+      return;
+    }
+
+    if (currentCategories.some((category) => category.label.toLowerCase() === trimmed.toLowerCase())) {
+      setToast({
+        id: Date.now(),
+        message: 'Такая категория уже есть',
+      });
+      return;
+    }
+
+    const nextCategories = [
+      ...currentCategories,
+      {
+        key: createCategoryKey(trimmed, currentCategories),
+        label: trimmed,
+        color: getNextCategoryColor(currentCategories.length),
+      },
+    ];
+
+    latestCategoriesRef.current = nextCategories;
+    setCategories(nextCategories);
+    triggerHaptic('light');
+  }
+
+  function renameCategory(categoryKey: Category, nextLabel: string) {
+    const trimmed = nextLabel.trim().slice(0, MAX_CATEGORY_LABEL_LENGTH);
+
+    if (!trimmed) {
+      return;
+    }
+
+    const currentCategories = latestCategoriesRef.current;
+    const duplicate = currentCategories.some(
+      (category) => category.key !== categoryKey && category.label.toLowerCase() === trimmed.toLowerCase(),
+    );
+
+    if (duplicate) {
+      setToast({
+        id: Date.now(),
+        message: 'Такая категория уже есть',
+      });
+      return;
+    }
+
+    const nextCategories = currentCategories.map((category) =>
+      category.key === categoryKey && category.label !== trimmed ? { ...category, label: trimmed } : category,
+    );
+
+    latestCategoriesRef.current = nextCategories;
+    setCategories(nextCategories);
+  }
+
+  function changeCategoryColor(categoryKey: Category, color: string) {
+    const nextCategories = latestCategoriesRef.current.map((category) =>
+      category.key === categoryKey ? { ...category, color } : category,
+    );
+
+    latestCategoriesRef.current = nextCategories;
+    setCategories(nextCategories);
   }
 
   function updateTask(updatedTask: Task) {
@@ -1261,7 +1467,9 @@ function App() {
 
   return (
     <div
-      className={`app${isBackgroundDragActive ? ' app--background-dragging' : ''}`}
+      className={`app${isBackgroundDragActive ? ' app--background-dragging' : ''}${
+        isBackgroundEditMode ? ' app--background-editing' : ''
+      }`}
       onDragEnter={handleBackgroundDragEnter}
       onDragLeave={handleBackgroundDragLeave}
       onDragOver={handleBackgroundDragOver}
@@ -1269,25 +1477,60 @@ function App() {
     >
       <BackgroundDecorations
         decorations={backgroundDecorations}
-        pointerX={parallaxState.pointerX}
-        pointerY={parallaxState.pointerY}
-        scrollY={parallaxState.scrollY}
+        isEditing={isBackgroundEditMode}
+        onDecorationDelete={deleteBackgroundDecoration}
+        onDecorationMove={moveBackgroundDecoration}
+        onDecorationMoveEnd={commitBackgroundDecorationMove}
+        onDecorationResize={resizeBackgroundDecoration}
+        onDecorationResizeEnd={commitBackgroundDecorationMove}
       />
       {isBackgroundDragActive && <div className="background-drop-hint">Отпустите изображение на фон</div>}
+      {backgroundDecorations.length > 0 && (
+        <aside className="background-toolbar" aria-label="Управление фоном">
+          <button
+            type="button"
+            className={`icon-button background-toolbar__button has-tooltip has-tooltip--end${
+              isBackgroundEditMode ? ' icon-button--active' : ''
+            }`}
+            data-tooltip={isBackgroundEditMode ? 'Сохранить изменения и выйти' : 'Редактировать фон'}
+            title={isBackgroundEditMode ? 'Сохранить изменения и выйти' : 'Редактировать фон'}
+            aria-pressed={isBackgroundEditMode}
+            onClick={isBackgroundEditMode ? saveAndExitBackgroundEditMode : startBackgroundEditMode}
+          >
+            {isBackgroundEditMode ? (
+              <Save size={18} strokeWidth={1.9} aria-hidden="true" />
+            ) : (
+              <Palette size={18} strokeWidth={1.9} aria-hidden="true" />
+            )}
+            <span className="sr-only">
+              {isBackgroundEditMode ? 'Сохранить изменения и выйти' : 'Редактировать фон'}
+            </span>
+          </button>
+          {isBackgroundEditMode && (
+            <button
+              type="button"
+              className="icon-button background-toolbar__button has-tooltip has-tooltip--end"
+              data-tooltip="Очистить фон"
+              title="Очистить фон"
+              onClick={clearBackgroundDecorations}
+            >
+              <ImageOff size={18} strokeWidth={1.9} aria-hidden="true" />
+              <span className="sr-only">Очистить фон</span>
+            </button>
+          )}
+        </aside>
+      )}
       <div className="app__inner">
         <Header
           backupTooltip={backupTooltip}
           screen={screen}
           currentUser={currentUser}
-          hasBackgroundDecorations={backgroundDecorations.length > 0}
           isBackuping={isBackuping}
           isCollapsed={isHeaderHidden}
           isLoggingOut={isLoggingOut}
           syncStatus={syncStatus}
           syncTooltip={syncTooltip}
-          onBackgroundFiles={(files) => void addBackgroundFiles(files)}
           onBackup={() => backupRunnerRef.current('manual')}
-          onClearBackground={clearBackgroundDecorations}
           onCreate={() => setCreateModalOpen(true)}
           onLogout={() => void handleLogout()}
           onToggleScreen={() => navigateToScreen(screen === 'active' ? 'archive' : 'active')}
@@ -1314,13 +1557,15 @@ function App() {
         {screen === 'active' ? (
           <main className="screen">
             <div className="sections">
-              {CATEGORIES.map((category) => {
-                const tasksForCategory = tasksByCategory[category.key];
+              {categories.map((category) => {
+                const tasksForCategory = tasksByCategory[category.key] ?? [];
 
                 return (
                   <CategorySection
                     key={category.key}
                     category={category.key}
+                    categories={categories}
+                    color={category.color}
                     label={category.label}
                     tasks={tasksForCategory}
                     isLoading={isInitialLoading}
@@ -1336,6 +1581,8 @@ function App() {
                         deadline: { kind: 'none' },
                       })
                     }
+                    onCategoryColorChange={changeCategoryColor}
+                    onCategoryRename={renameCategory}
                     onDropTargetChange={updateDropTarget}
                     onQuickClose={(taskId) => archiveTask(taskId)}
                     onTaskDragEnd={endTaskDrag}
@@ -1348,12 +1595,19 @@ function App() {
                 );
               })}
             </div>
+            <div className="category-creator">
+              <InlineCreator
+                maxLength={MAX_CATEGORY_LABEL_LENGTH}
+                placeholder="Новая категория..."
+                onCreate={createCategory}
+              />
+            </div>
           </main>
         ) : (
           <main className="screen">
             <ArchiveList
               tasks={archiveTasks}
-              categories={CATEGORIES}
+              categories={categories}
               onDelete={deleteTask}
               onRestore={restoreTask}
             />
@@ -1377,8 +1631,8 @@ function App() {
         <Suspense fallback={null}>
           <CreateTaskModal
             isOpen={isCreateModalOpen}
-            categories={CATEGORIES}
-            defaultCategory="passion"
+            categories={categories}
+            defaultCategory={categories[0]?.key ?? 'passion'}
             onClose={() => setCreateModalOpen(false)}
             onCreate={createTask}
           />

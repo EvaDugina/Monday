@@ -1,7 +1,8 @@
-import { GripVertical, Pin, RotateCw } from 'lucide-react';
+import { GripVertical, Pin } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
-import type { Category, Task } from '../types';
-import { CATEGORIES, MAX_TITLE_LENGTH } from '../types';
+import type { CSSProperties } from 'react';
+import type { Category, CategoryOption, Task } from '../types';
+import { MAX_TITLE_LENGTH } from '../types';
 import { triggerHaptic } from '../utils/haptic';
 import { getUrgency } from '../utils/urgency';
 
@@ -10,32 +11,25 @@ const SWIPE_MAX_OFFSET = 140;
 const LONG_PRESS_MS = 280;
 const LONG_PRESS_TOLERANCE = 8;
 
-const KNOWN_CATEGORIES: Category[] = ['passion', 'routine', 'body', 'projects'];
-
-function asCategory(value: string | null | undefined): Category | null {
-  if (!value) return null;
-  return (KNOWN_CATEGORIES as string[]).includes(value) ? (value as Category) : null;
-}
-
 function findCategoryUnder(x: number, y: number): Category | null {
   const elements = document.elementsFromPoint(x, y);
+
   for (const element of elements) {
-    if (element instanceof HTMLElement && element.matches('[data-category]')) {
-      const matched = asCategory(element.getAttribute('data-category'));
-      if (matched) return matched;
-    }
     if (element instanceof HTMLElement) {
-      const ancestor = element.closest<HTMLElement>('.category-section[data-category]');
-      if (ancestor) {
-        const matched = asCategory(ancestor.getAttribute('data-category'));
-        if (matched) return matched;
-      }
+      const section = element.matches('.category-section[data-category]')
+        ? element
+        : element.closest<HTMLElement>('.category-section[data-category]');
+      const category = section?.getAttribute('data-category');
+
+      if (category) return category;
     }
   }
+
   return null;
 }
 
 interface TaskItemProps {
+  categories: CategoryOption[];
   task: Task;
   isDragging?: boolean;
   isClosing?: boolean;
@@ -50,6 +44,7 @@ interface TaskItemProps {
 }
 
 function TaskItem({
+  categories,
   task,
   isDragging = false,
   isClosing = false,
@@ -63,7 +58,9 @@ function TaskItem({
   onTouchDrop,
 }: TaskItemProps) {
   const urgency = getUrgency(task.deadline);
-  const isWeeklyRecurring = task.deadline.kind === 'recurring' && task.deadline.mode === 'week';
+  const rightBadges = urgency.label ? [{ label: urgency.label, tone: urgency.tone }] : [];
+  const categoryColor = categories.find((option) => option.key === task.category)?.color ?? '#868e96';
+  const categoryStyle = { '--category-color': categoryColor } as CSSProperties;
 
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [draftTitle, setDraftTitle] = useState(task.title);
@@ -327,6 +324,10 @@ function TaskItem({
   }
 
   const isSwipeRevealed = swipeOffset < -8;
+  const cardStyle =
+    swipeOffset !== 0
+      ? ({ ...categoryStyle, transform: `translate3d(${swipeOffset}px, 0, 0)` } as CSSProperties)
+      : categoryStyle;
 
   return (
     <article
@@ -352,7 +353,7 @@ function TaskItem({
       onPointerMove={handleCardPointerMove}
       onPointerUp={handleCardPointerUp}
       onPointerCancel={handleCardPointerCancel}
-      style={swipeOffset !== 0 ? { transform: `translate3d(${swipeOffset}px, 0, 0)` } : undefined}
+      style={cardStyle}
     >
       {onQuickClose && (
         <button
@@ -371,87 +372,94 @@ function TaskItem({
       )}
 
       <div className="task-card__headline">
-        {onChangeCategory && (
-          <span className="task-card__category-chip" ref={categoryMenuRef}>
-            <button
-              type="button"
-              className="task-card__category-chip-button"
-              data-category={task.category}
-              aria-haspopup="menu"
-              aria-expanded={isCategoryMenuOpen}
-              aria-label="Сменить раздел"
-              title="Сменить раздел"
-              disabled={isClosing}
-              onClick={(event) => {
+        <div className="task-card__title-cluster">
+          {onChangeCategory && (
+            <span className="task-card__category-chip" ref={categoryMenuRef}>
+              <button
+                type="button"
+                className="task-card__category-chip-button"
+                data-category={task.category}
+                aria-haspopup="menu"
+                aria-expanded={isCategoryMenuOpen}
+                aria-label="Сменить раздел"
+                title="Сменить раздел"
+                disabled={isClosing}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  setIsCategoryMenuOpen((value) => !value);
+                }}
+              />
+              {isCategoryMenuOpen && (
+                <div className="category-popover" role="menu" onClick={(event) => event.stopPropagation()}>
+                  {categories.map((option) => (
+                    <button
+                      key={option.key}
+                      type="button"
+                      className={`category-popover__item${
+                        option.key === task.category ? ' category-popover__item--active' : ''
+                      }`}
+                      role="menuitemradio"
+                      aria-checked={option.key === task.category}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        handleCategorySelect(option.key);
+                      }}
+                    >
+                      <span
+                        className="category-popover__dot"
+                        style={{ '--category-color': option.color } as CSSProperties}
+                        aria-hidden="true"
+                      />
+                      {option.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </span>
+          )}
+
+          {task.pinned && <Pin className="task-card__pin-icon" size={12} strokeWidth={2.2} aria-label="Закреплено" />}
+          {task.urgent && <span className="task-card__badge task-card__badge--urgent">СРОЧНО</span>}
+
+          {isEditingTitle ? (
+            <input
+              ref={titleInputRef}
+              className="task-card__title task-card__title-input"
+              type="text"
+              value={draftTitle}
+              maxLength={MAX_TITLE_LENGTH}
+              onChange={(event) => setDraftTitle(event.target.value)}
+              onBlur={commitTitleEdit}
+              onClick={(event) => event.stopPropagation()}
+              onKeyDown={(event) => {
                 event.stopPropagation();
-                setIsCategoryMenuOpen((value) => !value);
+                if (event.key === 'Enter') {
+                  event.preventDefault();
+                  commitTitleEdit();
+                } else if (event.key === 'Escape') {
+                  event.preventDefault();
+                  cancelTitleEdit();
+                }
               }}
             />
-            {isCategoryMenuOpen && (
-              <div className="category-popover" role="menu" onClick={(event) => event.stopPropagation()}>
-                {CATEGORIES.map((option) => (
-                  <button
-                    key={option.key}
-                    type="button"
-                    className={`category-popover__item${
-                      option.key === task.category ? ' category-popover__item--active' : ''
-                    }`}
-                    role="menuitemradio"
-                    aria-checked={option.key === task.category}
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      handleCategorySelect(option.key);
-                    }}
-                  >
-                    <span className="category-popover__dot" data-category={option.key} aria-hidden="true" />
-                    {option.label}
-                  </button>
-                ))}
-              </div>
-            )}
-          </span>
-        )}
+          ) : (
+            <span
+              className={`task-card__title${onSaveTitle ? ' task-card__title--editable' : ''}`}
+              onClick={onSaveTitle ? startTitleEdit : undefined}
+            >
+              {task.title}
+            </span>
+          )}
+        </div>
 
-        {task.pinned && (
-          <Pin
-            className="task-card__pin-icon"
-            size={12}
-            strokeWidth={2.2}
-            aria-label="Закреплено"
-          />
-        )}
-
-        {task.urgent && <span className="task-card__urgent-badge">СРОЧНО</span>}
-        {isWeeklyRecurring && <span className="task-card__repeat-badge">ЕЖЕНЕДЕЛЬНО</span>}
-
-        {isEditingTitle ? (
-          <input
-            ref={titleInputRef}
-            className="task-card__title task-card__title-input"
-            type="text"
-            value={draftTitle}
-            maxLength={MAX_TITLE_LENGTH}
-            onChange={(event) => setDraftTitle(event.target.value)}
-            onBlur={commitTitleEdit}
-            onClick={(event) => event.stopPropagation()}
-            onKeyDown={(event) => {
-              event.stopPropagation();
-              if (event.key === 'Enter') {
-                event.preventDefault();
-                commitTitleEdit();
-              } else if (event.key === 'Escape') {
-                event.preventDefault();
-                cancelTitleEdit();
-              }
-            }}
-          />
-        ) : (
-          <span
-            className={`task-card__title${onSaveTitle ? ' task-card__title--editable' : ''}`}
-            onClick={onSaveTitle ? startTitleEdit : undefined}
-          >
-            {task.title}
-          </span>
+        {rightBadges.length > 0 && (
+          <div className="task-card__badge-row" aria-label="Параметры задачи">
+            {rightBadges.map((badge) => (
+              <span key={`${badge.tone}-${badge.label}`} className={`task-card__badge task-card__badge--${badge.tone}`}>
+                {badge.label}
+              </span>
+            ))}
+          </div>
         )}
       </div>
 
@@ -488,22 +496,6 @@ function TaskItem({
 
       {task.description && <p className="task-card__description">{task.description}</p>}
 
-      {urgency.label && (
-        <div className="task-card__meta">
-          {urgency.tone === 'recurring' && (
-            <RotateCw className="task-card__meta-icon" size={13} strokeWidth={1.75} aria-hidden="true" />
-          )}
-          {(urgency.tone === 'urgent' || urgency.tone === 'soon') && (
-            <span
-              className={`task-card__meta-dot task-card__meta-dot--${urgency.tone}`}
-              aria-hidden="true"
-            />
-          )}
-          <span className={`task-card__deadline task-card__deadline--${urgency.tone}`}>
-            {urgency.label}
-          </span>
-        </div>
-      )}
     </article>
   );
 }

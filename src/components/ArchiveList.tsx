@@ -1,12 +1,8 @@
 import { useMemo } from 'react';
-import type { Category, Task } from '../types';
+import type { CSSProperties } from 'react';
+import type { Category, CategoryOption, Task } from '../types';
 import { formatDateTime } from '../utils/dates';
 import { getUrgency } from '../utils/urgency';
-
-interface CategoryOption {
-  key: Category;
-  label: string;
-}
 
 interface ArchiveListProps {
   tasks: Task[];
@@ -19,6 +15,11 @@ function ArchiveList({ tasks, categories, onRestore, onDelete }: ArchiveListProp
   const categoryLabels = useMemo(
     () =>
       Object.fromEntries(categories.map((category) => [category.key, category.label])) as Record<Category, string>,
+    [categories],
+  );
+  const categoryColors = useMemo(
+    () =>
+      Object.fromEntries(categories.map((category) => [category.key, category.color])) as Record<Category, string>,
     [categories],
   );
 
@@ -40,11 +41,16 @@ function ArchiveList({ tasks, categories, onRestore, onDelete }: ArchiveListProp
         const urgency = getUrgency(task.deadline);
 
         return (
-          <article key={task.id} className="archive-item" data-category={task.category}>
+          <article
+            key={task.id}
+            className="archive-item"
+            data-category={task.category}
+            style={{ '--category-color': categoryColors[task.category] ?? '#868e96' } as CSSProperties}
+          >
             <div className="archive-item__content">
               <div className="archive-item__topline">
                 <span className="archive-item__dot" aria-hidden="true" />
-                <span className="archive-item__category">{categoryLabels[task.category]}</span>
+                <span className="archive-item__category">{categoryLabels[task.category] ?? task.category}</span>
                 {task.closedAt && <span className="archive-item__time">{formatDateTime(task.closedAt)}</span>}
               </div>
 

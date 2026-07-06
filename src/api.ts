@@ -1,6 +1,7 @@
 import type {
   BackupSnapshotResponse,
   BackupSource,
+  CategoryOption,
   CurrentUser,
   SaveTasksResponse,
   ServerTasksState,
@@ -27,6 +28,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function isServerTasksState(value: unknown): value is ServerTasksState {
   return (
     isRecord(value) &&
+    Array.isArray(value.categories) &&
     Array.isArray(value.tasks) &&
     typeof value.updatedAt === 'string' &&
     typeof value.version === 'number'
@@ -89,13 +91,17 @@ export async function pullTasksFromServer(): Promise<ServerTasksState> {
   return payload;
 }
 
-export async function pushTasksToServer(tasks: Task[], expectedVersion: number): Promise<SaveTasksResponse> {
+export async function pushTasksToServer(
+  tasks: Task[],
+  categories: CategoryOption[],
+  expectedVersion: number,
+): Promise<SaveTasksResponse> {
   const payload = await readJsonResponse<SaveTasksResponse>(buildApiPath('tasks'), {
     method: 'PUT',
     headers: {
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({ tasks, expectedVersion }),
+    body: JSON.stringify({ categories, tasks, expectedVersion }),
   });
 
   if (!isSaveTasksResponse(payload)) {

@@ -1,13 +1,9 @@
 import { useEffect, useId, useState } from 'react';
+import type { CSSProperties } from 'react';
 import { useModalFocusTrap } from '../hooks/useModalFocusTrap';
-import type { Category, Deadline } from '../types';
+import type { Category, CategoryOption, Deadline } from '../types';
 import { MAX_DESCRIPTION_LENGTH, MAX_TITLE_LENGTH } from '../types';
 import DeadlineEditor from './DeadlineEditor';
-
-interface CategoryOption {
-  key: Category;
-  label: string;
-}
 
 interface CreateTaskModalProps {
   isOpen: boolean;
@@ -152,6 +148,7 @@ function CreateTaskModal({
                     type="button"
                     className={`chip${category === option.key ? ' chip--active' : ''}`}
                     data-category={option.key}
+                    style={{ '--category-color': option.color } as CSSProperties}
                     onClick={() => setCategory(option.key)}
                   >
                     {option.label}

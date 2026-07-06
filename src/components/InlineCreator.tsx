@@ -2,11 +2,12 @@ import { useState } from 'react';
 import { MAX_TITLE_LENGTH } from '../types';
 
 interface InlineCreatorProps {
+  maxLength?: number;
   placeholder: string;
   onCreate: (title: string) => void;
 }
 
-function InlineCreator({ placeholder, onCreate }: InlineCreatorProps) {
+function InlineCreator({ maxLength = MAX_TITLE_LENGTH, placeholder, onCreate }: InlineCreatorProps) {
   const [title, setTitle] = useState('');
 
   function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
@@ -28,7 +29,7 @@ function InlineCreator({ placeholder, onCreate }: InlineCreatorProps) {
         className="text-input"
         type="text"
         value={title}
-        maxLength={MAX_TITLE_LENGTH}
+        maxLength={maxLength}
         placeholder={placeholder}
         onChange={(event) => setTitle(event.target.value)}
       />

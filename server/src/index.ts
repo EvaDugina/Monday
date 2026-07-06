@@ -173,7 +173,7 @@ router.get('/api/tasks', readLimiter, (_request, response) => {
 
 router.put('/api/tasks', writeLimiter, (request, response) => {
   const payload = parseTasksPayload(request.body);
-  const result = setTasksState(payload.tasks, payload.expectedVersion);
+  const result = setTasksState(payload.tasks, payload.categories, payload.expectedVersion);
 
   if (result.kind === 'conflict') {
     response.status(409).json(result.state);

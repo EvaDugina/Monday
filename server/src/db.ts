@@ -8,6 +8,17 @@ interface StoredStateRow {
   version: number;
 }
 
+interface StoredCategory {
+  key: string;
+  label: string;
+  color: string;
+}
+
+interface StoredBoardState {
+  categories: StoredCategory[];
+  tasks: unknown[];
+}
+
 export type BackupSource = 'auto' | 'manual';
 
 export interface BackupOwner {
@@ -33,6 +44,12 @@ interface LatestBackupRow {
 
 const databasePath = process.env.SQLITE_PATH ?? '/data/monday.sqlite';
 const MAX_BACKUPS_PER_USER = 3;
+const DEFAULT_CATEGORIES: StoredCategory[] = [
+  { key: 'passion', label: 'Страсти', color: '#e03131' },
+  { key: 'routine', label: 'Бытец', color: '#868e96' },
+  { key: 'body', label: 'Тело', color: '#002fa7' },
+  { key: 'projects', label: 'Projects', color: '#7048e8' },
+];
 mkdirSync(dirname(databasePath), { recursive: true });
 
 const db = new Database(databasePath);
@@ -96,12 +113,25 @@ function readStateRow(): StoredStateRow {
   return row;
 }
 
-function parseTasks(raw: string): unknown[] {
+function parseBoardState(raw: string): StoredBoardState {
   try {
     const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
+
+    if (Array.isArray(parsed)) {
+      return { categories: DEFAULT_CATEGORIES, tasks: parsed };
+    }
+
+    if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
+      const candidate = parsed as { categories?: unknown; tasks?: unknown };
+      return {
+        categories: Array.isArray(candidate.categories) ? (candidate.categories as StoredCategory[]) : DEFAULT_CATEGORIES,
+        tasks: Array.isArray(candidate.tasks) ? candidate.tasks : [],
+      };
+    }
+
+    return { categories: DEFAULT_CATEGORIES, tasks: [] };
   } catch {
-    return [];
+    return { categories: DEFAULT_CATEGORIES, tasks: [] };
   }
 }
 
@@ -113,15 +143,23 @@ function countBackupsForUser(userKey: string): number {
   return row?.count ?? 0;
 }
 
-function buildTasksState(row: StoredStateRow): { tasks: unknown[]; updatedAt: string; version: number } {
+function buildTasksState(row: StoredStateRow): {
+  categories: StoredCategory[];
+  tasks: unknown[];
+  updatedAt: string;
+  version: number;
+} {
+  const boardState = parseBoardState(row.tasks_json);
+
   return {
-    tasks: parseTasks(row.tasks_json),
+    categories: boardState.categories,
+    tasks: boardState.tasks,
     updatedAt: row.updated_at,
     version: row.version,
   };
 }
 
-export function getTasksState(): { tasks: unknown[]; updatedAt: string; version: number } {
+export function getTasksState(): { categories: StoredCategory[]; tasks: unknown[]; updatedAt: string; version: number } {
   const row = readStateRow();
 
   return buildTasksState(row);
@@ -129,10 +167,11 @@ export function getTasksState(): { tasks: unknown[]; updatedAt: string; version:
 
 export function setTasksState(
   tasks: unknown[],
+  categories: StoredCategory[],
   expectedVersion: number,
-): { kind: 'updated'; state: { tasks: unknown[]; updatedAt: string; version: number } } | {
+): { kind: 'updated'; state: { categories: StoredCategory[]; tasks: unknown[]; updatedAt: string; version: number } } | {
   kind: 'conflict';
-  state: { tasks: unknown[]; updatedAt: string; version: number };
+  state: { categories: StoredCategory[]; tasks: unknown[]; updatedAt: string; version: number };
 } {
   const updatedAt = new Date().toISOString();
   const nextVersion = expectedVersion + 1;
@@ -145,7 +184,7 @@ export function setTasksState(
     WHERE id = 1
       AND version = @expectedVersion
   `).run({
-    tasksJson: JSON.stringify(tasks),
+    tasksJson: JSON.stringify({ categories, tasks }),
     updatedAt,
     nextVersion,
     expectedVersion,
@@ -161,6 +200,7 @@ export function setTasksState(
   return {
     kind: 'updated',
     state: {
+      categories,
       tasks,
       updatedAt,
       version: nextVersion,

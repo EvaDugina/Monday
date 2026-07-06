@@ -1,12 +1,22 @@
-const CATEGORIES = new Set(['passion', 'routine', 'body', 'projects']);
 const STATUSES = new Set(['open', 'closed']);
 const DEADLINE_KINDS = new Set(['none', 'date', 'range', 'recurring']);
 const RECURRING_MODES = new Set(['day', 'week', 'month']);
 
+const DEFAULT_CATEGORIES = [
+  { key: 'passion', label: 'Страсти', color: '#e03131' },
+  { key: 'routine', label: 'Бытец', color: '#868e96' },
+  { key: 'body', label: 'Тело', color: '#002fa7' },
+  { key: 'projects', label: 'Projects', color: '#7048e8' },
+];
+
 const MAX_TASKS = 500;
+const MAX_CATEGORIES = 16;
 const MAX_ID_LENGTH = 128;
+const MAX_CATEGORY_KEY_LENGTH = 64;
+const MAX_CATEGORY_LABEL_LENGTH = 40;
 const MAX_TITLE_LENGTH = 200;
 const MAX_DESCRIPTION_LENGTH = 2000;
+const HEX_COLOR_PATTERN = /^#[0-9a-f]{6}$/i;
 
 export interface ApiDeadlineNone {
   kind: 'none';
@@ -35,7 +45,7 @@ export interface ApiTask {
   id: string;
   title: string;
   description: string;
-  category: 'passion' | 'routine' | 'body' | 'projects';
+  category: string;
   deadline: ApiDeadline;
   urgent: boolean;
   pinned?: boolean;
@@ -44,7 +54,14 @@ export interface ApiTask {
   closedAt?: string;
 }
 
+export interface ApiCategoryOption {
+  key: string;
+  label: string;
+  color: string;
+}
+
 export interface PutTasksPayload {
+  categories: ApiCategoryOption[];
   tasks: ApiTask[];
   expectedVersion: number;
 }
@@ -170,12 +187,8 @@ function parseDeadline(value: unknown, field: string): ApiDeadline {
 
 function parseTask(value: unknown, index: number): ApiTask {
   const record = expectRecord(value, `tasks[${index}] must be an object`);
-  const category = expectString(record.category, `tasks[${index}].category`, 32);
+  const category = expectTrimmedString(record.category, `tasks[${index}].category`, MAX_CATEGORY_KEY_LENGTH);
   const status = expectString(record.status, `tasks[${index}].status`, 32);
-
-  if (!CATEGORIES.has(category)) {
-    throw new ValidationError(`tasks[${index}].category is invalid`);
-  }
 
   if (!STATUSES.has(status)) {
     throw new ValidationError(`tasks[${index}].status is invalid`);
@@ -186,7 +199,7 @@ function parseTask(value: unknown, index: number): ApiTask {
     id: expectTrimmedString(record.id, `tasks[${index}].id`, MAX_ID_LENGTH),
     title: expectTrimmedString(record.title, `tasks[${index}].title`, MAX_TITLE_LENGTH),
     description: expectString(record.description ?? '', `tasks[${index}].description`, MAX_DESCRIPTION_LENGTH),
-    category: category as ApiTask['category'],
+    category,
     deadline: parseDeadline(record.deadline, `tasks[${index}].deadline`),
     urgent: expectBoolean(record.urgent, `tasks[${index}].urgent`),
     status: status as ApiTask['status'],
@@ -212,8 +225,47 @@ function parseTask(value: unknown, index: number): ApiTask {
   return parsedTask;
 }
 
+function parseCategories(value: unknown): ApiCategoryOption[] {
+  if (value === undefined) {
+    return DEFAULT_CATEGORIES;
+  }
+
+  if (!Array.isArray(value)) {
+    throw new ValidationError('Body must include categories: CategoryOption[]');
+  }
+
+  if (value.length === 0) {
+    throw new ValidationError('categories must not be empty');
+  }
+
+  if (value.length > MAX_CATEGORIES) {
+    throw new ValidationError(`categories must contain at most ${MAX_CATEGORIES} items`);
+  }
+
+  const seenKeys = new Set<string>();
+
+  return value.map((candidate, index) => {
+    const record = expectRecord(candidate, `categories[${index}] must be an object`);
+    const key = expectTrimmedString(record.key, `categories[${index}].key`, MAX_CATEGORY_KEY_LENGTH);
+    const label = expectTrimmedString(record.label, `categories[${index}].label`, MAX_CATEGORY_LABEL_LENGTH);
+    const color = expectTrimmedString(record.color, `categories[${index}].color`, 7);
+
+    if (seenKeys.has(key)) {
+      throw new ValidationError(`categories[${index}].key is duplicated`);
+    }
+
+    if (!HEX_COLOR_PATTERN.test(color)) {
+      throw new ValidationError(`categories[${index}].color must be a #RRGGBB color`);
+    }
+
+    seenKeys.add(key);
+    return { key, label, color };
+  });
+}
+
 export function parseTasksPayload(value: unknown): PutTasksPayload {
   const record = expectRecord(value, 'Body must be a JSON object');
+  const categories = parseCategories(record.categories);
   const tasks = record.tasks;
 
   if (!Array.isArray(tasks)) {
@@ -225,6 +277,7 @@ export function parseTasksPayload(value: unknown): PutTasksPayload {
   }
 
   return {
+    categories,
     tasks: tasks.map((task, index) => parseTask(task, index)),
     expectedVersion: expectInteger(record.expectedVersion, 'expectedVersion', 0),
   };
