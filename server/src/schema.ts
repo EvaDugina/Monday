@@ -58,6 +58,8 @@ export interface ApiCategoryOption {
   key: string;
   label: string;
   color: string;
+  status?: 'active' | 'archived';
+  archivedAt?: string;
 }
 
 export interface PutTasksPayload {
@@ -249,6 +251,7 @@ function parseCategories(value: unknown): ApiCategoryOption[] {
     const key = expectTrimmedString(record.key, `categories[${index}].key`, MAX_CATEGORY_KEY_LENGTH);
     const label = expectTrimmedString(record.label, `categories[${index}].label`, MAX_CATEGORY_LABEL_LENGTH);
     const color = expectTrimmedString(record.color, `categories[${index}].color`, 7);
+    const status = record.status === 'archived' ? 'archived' : undefined;
 
     if (seenKeys.has(key)) {
       throw new ValidationError(`categories[${index}].key is duplicated`);
@@ -259,7 +262,17 @@ function parseCategories(value: unknown): ApiCategoryOption[] {
     }
 
     seenKeys.add(key);
-    return { key, label, color };
+    const category: ApiCategoryOption = { key, label, color };
+
+    if (status) {
+      category.status = status;
+      category.archivedAt =
+        record.archivedAt === undefined
+          ? new Date().toISOString()
+          : expectIsoDateString(record.archivedAt, `categories[${index}].archivedAt`);
+    }
+
+    return category;
   });
 }
 

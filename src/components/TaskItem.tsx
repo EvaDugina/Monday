@@ -1,8 +1,7 @@
 import { GripVertical, Pin } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import type { Category, CategoryOption, Task } from '../types';
-import { MAX_TITLE_LENGTH } from '../types';
 import { triggerHaptic } from '../utils/haptic';
 import { getUrgency } from '../utils/urgency';
 
@@ -37,8 +36,6 @@ interface TaskItemProps {
   onDragEnd?: () => void;
   onOpen: () => void;
   onQuickClose?: () => void;
-  onSaveTitle?: (taskId: string, title: string) => void;
-  onChangeCategory?: (taskId: string, category: Category) => void;
   onTouchDragOver?: (category: Category | null) => void;
   onTouchDrop?: (category: Category) => void;
 }
@@ -52,8 +49,6 @@ function TaskItem({
   onDragEnd,
   onOpen,
   onQuickClose,
-  onSaveTitle,
-  onChangeCategory,
   onTouchDragOver,
   onTouchDrop,
 }: TaskItemProps) {
@@ -61,13 +56,6 @@ function TaskItem({
   const rightBadges = urgency.label ? [{ label: urgency.label, tone: urgency.tone }] : [];
   const categoryColor = categories.find((option) => option.key === task.category)?.color ?? '#868e96';
   const categoryStyle = { '--category-color': categoryColor } as CSSProperties;
-
-  const [isEditingTitle, setIsEditingTitle] = useState(false);
-  const [draftTitle, setDraftTitle] = useState(task.title);
-  const titleInputRef = useRef<HTMLInputElement>(null);
-
-  const [isCategoryMenuOpen, setIsCategoryMenuOpen] = useState(false);
-  const categoryMenuRef = useRef<HTMLSpanElement>(null);
 
   const [swipeOffset, setSwipeOffset] = useState(0);
   const [isTouchDragging, setIsTouchDragging] = useState(false);
@@ -83,46 +71,6 @@ function TaskItem({
     active: boolean;
   } | null>(null);
   const justGesturedRef = useRef(false);
-
-  useEffect(() => {
-    if (!isEditingTitle) {
-      setDraftTitle(task.title);
-    }
-  }, [task.title, isEditingTitle]);
-
-  useEffect(() => {
-    if (isEditingTitle) {
-      titleInputRef.current?.focus();
-      titleInputRef.current?.select();
-    }
-  }, [isEditingTitle]);
-
-  useEffect(() => {
-    if (!isCategoryMenuOpen) return;
-
-    function handleDocumentPointer(event: PointerEvent) {
-      if (
-        categoryMenuRef.current &&
-        event.target instanceof Node &&
-        !categoryMenuRef.current.contains(event.target)
-      ) {
-        setIsCategoryMenuOpen(false);
-      }
-    }
-
-    function handleEscape(event: KeyboardEvent) {
-      if (event.key === 'Escape') {
-        setIsCategoryMenuOpen(false);
-      }
-    }
-
-    document.addEventListener('pointerdown', handleDocumentPointer);
-    document.addEventListener('keydown', handleEscape);
-    return () => {
-      document.removeEventListener('pointerdown', handleDocumentPointer);
-      document.removeEventListener('keydown', handleEscape);
-    };
-  }, [isCategoryMenuOpen]);
 
   function handleDragStart(event: React.DragEvent<HTMLDivElement>) {
     if (isClosing) {
@@ -145,46 +93,18 @@ function TaskItem({
     }
   }
 
-  function startTitleEdit(event: React.MouseEvent) {
-    if (isClosing || !onSaveTitle) return;
-    event.stopPropagation();
-    setDraftTitle(task.title);
-    setIsEditingTitle(true);
-  }
-
-  function commitTitleEdit() {
-    const trimmed = draftTitle.trim();
-    if (trimmed && trimmed !== task.title && onSaveTitle) {
-      onSaveTitle(task.id, trimmed);
-      triggerHaptic('light');
-    }
-    setIsEditingTitle(false);
-  }
-
-  function cancelTitleEdit() {
-    setDraftTitle(task.title);
-    setIsEditingTitle(false);
-  }
-
-  function handleCategorySelect(nextCategory: Category) {
-    if (onChangeCategory && nextCategory !== task.category) {
-      onChangeCategory(task.id, nextCategory);
-    }
-    setIsCategoryMenuOpen(false);
-  }
-
   function isInteractiveTarget(target: EventTarget | null): boolean {
     if (!(target instanceof HTMLElement)) return false;
     return Boolean(
       target.closest(
-        '.task-card__checkbox, .task-card__drag-handle, .task-card__category-chip, .category-popover, .task-card__title-input, button, input, textarea, select, a, [role="menu"]',
+        '.task-card__checkbox, .task-card__drag-handle, button, input, textarea, select, a, [role="menu"]',
       ),
     );
   }
 
   function handleCardPointerDown(event: React.PointerEvent<HTMLElement>) {
     if (event.pointerType !== 'touch') return;
-    if (isClosing || isEditingTitle || !onQuickClose) return;
+    if (isClosing || !onQuickClose) return;
     if (isInteractiveTarget(event.target)) return;
 
     swipeStateRef.current = {
@@ -236,6 +156,18 @@ function TaskItem({
       }
     }
     setSwipeOffset(0);
+  }
+
+  function handleTitleClusterClick(event: React.MouseEvent<HTMLDivElement>) {
+    event.stopPropagation();
+    if (justGesturedRef.current) {
+      justGesturedRef.current = false;
+      event.preventDefault();
+      return;
+    }
+    if (!isClosing) {
+      onOpen();
+    }
   }
 
   function handleCardPointerCancel() {
@@ -336,7 +268,7 @@ function TaskItem({
       }${isSwipeRevealed ? ' task-card--swiping' : ''}`}
       data-category={task.category}
       role="button"
-      tabIndex={isClosing || isEditingTitle ? -1 : 0}
+      tabIndex={isClosing ? -1 : 0}
       aria-disabled={isClosing || undefined}
       aria-label={`Открыть задачу: ${task.title}`}
       onClick={(event) => {
@@ -345,7 +277,7 @@ function TaskItem({
           event.preventDefault();
           return;
         }
-        if (isClosing || isEditingTitle) return;
+        if (isClosing) return;
         onOpen();
       }}
       onKeyDown={handleActivationKey}
@@ -372,84 +304,15 @@ function TaskItem({
       )}
 
       <div className="task-card__headline">
-        <div className="task-card__title-cluster">
-          {onChangeCategory && (
-            <span className="task-card__category-chip" ref={categoryMenuRef}>
-              <button
-                type="button"
-                className="task-card__category-chip-button"
-                data-category={task.category}
-                aria-haspopup="menu"
-                aria-expanded={isCategoryMenuOpen}
-                aria-label="Сменить раздел"
-                title="Сменить раздел"
-                disabled={isClosing}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  setIsCategoryMenuOpen((value) => !value);
-                }}
-              />
-              {isCategoryMenuOpen && (
-                <div className="category-popover" role="menu" onClick={(event) => event.stopPropagation()}>
-                  {categories.map((option) => (
-                    <button
-                      key={option.key}
-                      type="button"
-                      className={`category-popover__item${
-                        option.key === task.category ? ' category-popover__item--active' : ''
-                      }`}
-                      role="menuitemradio"
-                      aria-checked={option.key === task.category}
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        handleCategorySelect(option.key);
-                      }}
-                    >
-                      <span
-                        className="category-popover__dot"
-                        style={{ '--category-color': option.color } as CSSProperties}
-                        aria-hidden="true"
-                      />
-                      {option.label}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </span>
-          )}
-
+        <div className="task-card__title-cluster" onClick={handleTitleClusterClick}>
           {task.pinned && <Pin className="task-card__pin-icon" size={12} strokeWidth={2.2} aria-label="Закреплено" />}
           {task.urgent && <span className="task-card__badge task-card__badge--urgent">СРОЧНО</span>}
 
-          {isEditingTitle ? (
-            <input
-              ref={titleInputRef}
-              className="task-card__title task-card__title-input"
-              type="text"
-              value={draftTitle}
-              maxLength={MAX_TITLE_LENGTH}
-              onChange={(event) => setDraftTitle(event.target.value)}
-              onBlur={commitTitleEdit}
-              onClick={(event) => event.stopPropagation()}
-              onKeyDown={(event) => {
-                event.stopPropagation();
-                if (event.key === 'Enter') {
-                  event.preventDefault();
-                  commitTitleEdit();
-                } else if (event.key === 'Escape') {
-                  event.preventDefault();
-                  cancelTitleEdit();
-                }
-              }}
-            />
-          ) : (
-            <span
-              className={`task-card__title${onSaveTitle ? ' task-card__title--editable' : ''}`}
-              onClick={onSaveTitle ? startTitleEdit : undefined}
-            >
+          <span className="task-card__title-shell task-card__title-shell--tooltip" data-full-title={task.title}>
+            <span className="task-card__title">
               {task.title}
             </span>
-          )}
+          </span>
         </div>
 
         {rightBadges.length > 0 && (

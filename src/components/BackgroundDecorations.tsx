@@ -9,6 +9,7 @@ export interface BackgroundDecoration {
   left: number;
   top: number;
   width: number;
+  height?: number;
   opacity: number;
   rotation: number;
   depth: number;
@@ -20,7 +21,7 @@ interface BackgroundDecorationsProps {
   onDecorationDelete: (id: string) => void;
   onDecorationMove: (id: string, left: number, top: number) => void;
   onDecorationMoveEnd: () => void;
-  onDecorationResize: (id: string, width: number) => void;
+  onDecorationResize: (id: string, width: number, height: number) => void;
   onDecorationResizeEnd: () => void;
 }
 
@@ -31,11 +32,16 @@ interface DragState {
   pointerId: number;
 }
 
+type ResizeHandle = 'bottom' | 'corner' | 'right';
+
 interface ResizeState {
+  handle: ResizeHandle;
+  startHeight: number;
   id: string;
   pointerId: number;
   startWidth: number;
   startX: number;
+  startY: number;
 }
 
 interface LayerMetrics {
@@ -46,7 +52,7 @@ interface LayerMetrics {
 }
 
 const MIN_DECORATION_WIDTH = 96;
-const MAX_DECORATION_WIDTH = 720;
+const MIN_DECORATION_HEIGHT = 72;
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max);
@@ -66,12 +72,6 @@ function getLayerMetrics(layer: HTMLDivElement | null): LayerMetrics {
     top: rect?.top ?? 0,
     width: Math.max(rect && rect.width > 0 ? rect.width : window.innerWidth, 1),
   };
-}
-
-function getMaxDecorationWidth(layer: HTMLDivElement | null): number {
-  const layerMetrics = getLayerMetrics(layer);
-
-  return Math.max(MIN_DECORATION_WIDTH, Math.min(MAX_DECORATION_WIDTH, layerMetrics.width * 0.72));
 }
 
 function BackgroundDecorations({
@@ -123,9 +123,10 @@ function BackgroundDecorations({
 
     const layerMetrics = getLayerMetrics(layerRef.current);
     const rect = event.currentTarget.getBoundingClientRect();
-    const maxLeft = Math.max(0, (layerMetrics.width - rect.width) / 2);
+    const maxLeft = layerMetrics.width / 2;
     const minLeft = -maxLeft;
-    const maxTop = Math.max(0, ((layerMetrics.height - rect.height) / layerMetrics.height) * 100);
+    const minTop = -((rect.height / layerMetrics.height) * 100);
+    const maxTop = 100;
     const nextLeft = clamp(
       event.clientX - layerMetrics.left - dragState.grabOffsetX - layerMetrics.width / 2,
       minLeft,
@@ -133,7 +134,7 @@ function BackgroundDecorations({
     );
     const nextTop = clamp(
       ((event.clientY - layerMetrics.top - dragState.grabOffsetY) / layerMetrics.height) * 100,
-      0,
+      minTop,
       maxTop,
     );
 
@@ -154,21 +155,29 @@ function BackgroundDecorations({
     onDecorationMoveEnd();
   }
 
-  function handleResizePointerDown(event: React.PointerEvent<HTMLButtonElement>, decoration: BackgroundDecoration): void {
+  function handleResizePointerDown(
+    event: React.PointerEvent<HTMLButtonElement>,
+    decoration: BackgroundDecoration,
+    handle: ResizeHandle,
+  ): void {
     if (!isEditing || event.button !== 0) {
       return;
     }
 
-    const maxWidth = getMaxDecorationWidth(layerRef.current);
+    const rect = event.currentTarget.closest<HTMLElement>('.background-decorations__frame')?.getBoundingClientRect();
+    const fallbackHeight = decoration.height ?? decoration.width * 0.66;
 
     event.preventDefault();
     event.stopPropagation();
     event.currentTarget.setPointerCapture(event.pointerId);
     setResizeState({
+      handle,
       id: decoration.id,
       pointerId: event.pointerId,
-      startWidth: clamp(decoration.width, MIN_DECORATION_WIDTH, maxWidth),
+      startHeight: Math.max(decoration.height ?? rect?.height ?? fallbackHeight, MIN_DECORATION_HEIGHT),
+      startWidth: Math.max(decoration.width, rect?.width ?? 0, MIN_DECORATION_WIDTH),
       startX: event.clientX,
+      startY: event.clientY,
     });
   }
 
@@ -177,12 +186,20 @@ function BackgroundDecorations({
       return;
     }
 
-    const maxWidth = getMaxDecorationWidth(layerRef.current);
-    const nextWidth = clamp(resizeState.startWidth + event.clientX - resizeState.startX, MIN_DECORATION_WIDTH, maxWidth);
+    const deltaX = event.clientX - resizeState.startX;
+    const deltaY = event.clientY - resizeState.startY;
+    const nextWidth =
+      resizeState.handle === 'right' || resizeState.handle === 'corner'
+        ? Math.max(MIN_DECORATION_WIDTH, resizeState.startWidth + deltaX)
+        : resizeState.startWidth;
+    const nextHeight =
+      resizeState.handle === 'bottom' || resizeState.handle === 'corner'
+        ? Math.max(MIN_DECORATION_HEIGHT, resizeState.startHeight + deltaY)
+        : resizeState.startHeight;
 
     event.preventDefault();
     event.stopPropagation();
-    onDecorationResize(decoration.id, Math.round(nextWidth));
+    onDecorationResize(decoration.id, Math.round(nextWidth), Math.round(nextHeight));
   }
 
   function handleResizePointerEnd(event: React.PointerEvent<HTMLButtonElement>): void {
@@ -215,9 +232,12 @@ function BackgroundDecorations({
             key={decoration.id}
             className={`background-decorations__item${isEditing ? ' background-decorations__item--editing' : ''}${
               isDragging ? ' background-decorations__item--dragging' : ''
-            }${isResizing ? ' background-decorations__item--resizing' : ''}`}
+            }${isResizing ? ' background-decorations__item--resizing' : ''}${
+              decoration.height ? ' background-decorations__item--sized' : ''
+            }`}
             style={{
               left: `calc(50% + ${decoration.left}px)`,
+              height: decoration.height ? `${decoration.height}px` : undefined,
               opacity: Math.max(decoration.opacity, 0.78),
               top: `${decoration.top}%`,
               transform: `translateX(-50%) rotate(${decoration.rotation}deg)`,
@@ -244,12 +264,34 @@ function BackgroundDecorations({
                   </button>
                   <button
                     type="button"
-                    className="background-decorations__resize has-tooltip"
+                    className="background-decorations__resize background-decorations__resize--right has-tooltip"
+                    aria-label={`Растянуть по ширине ${decoration.name}`}
+                    data-tooltip="Растянуть по ширине"
+                    title="Растянуть по ширине"
+                    onPointerCancel={handleResizePointerEnd}
+                    onPointerDown={(event) => handleResizePointerDown(event, decoration, 'right')}
+                    onPointerMove={(event) => handleResizePointerMove(event, decoration)}
+                    onPointerUp={handleResizePointerEnd}
+                  />
+                  <button
+                    type="button"
+                    className="background-decorations__resize background-decorations__resize--bottom has-tooltip"
+                    aria-label={`Растянуть по высоте ${decoration.name}`}
+                    data-tooltip="Растянуть по высоте"
+                    title="Растянуть по высоте"
+                    onPointerCancel={handleResizePointerEnd}
+                    onPointerDown={(event) => handleResizePointerDown(event, decoration, 'bottom')}
+                    onPointerMove={(event) => handleResizePointerMove(event, decoration)}
+                    onPointerUp={handleResizePointerEnd}
+                  />
+                  <button
+                    type="button"
+                    className="background-decorations__resize background-decorations__resize--corner has-tooltip"
                     aria-label={`Изменить размер ${decoration.name}`}
                     data-tooltip="Изменить размер"
                     title="Изменить размер"
                     onPointerCancel={handleResizePointerEnd}
-                    onPointerDown={(event) => handleResizePointerDown(event, decoration)}
+                    onPointerDown={(event) => handleResizePointerDown(event, decoration, 'corner')}
                     onPointerMove={(event) => handleResizePointerMove(event, decoration)}
                     onPointerUp={handleResizePointerEnd}
                   >

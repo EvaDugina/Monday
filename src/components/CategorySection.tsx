@@ -1,3 +1,4 @@
+import { Archive } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import type { Category, CategoryOption, Task } from '../types';
@@ -19,6 +20,7 @@ interface CategorySectionProps {
   isDropTarget: boolean;
   onDropTargetChange: (category: Category | null) => void;
   onCreate: (title: string) => void;
+  onCategoryArchive: (category: Category) => void;
   onCategoryColorChange: (category: Category, color: string) => void;
   onCategoryRename: (category: Category, label: string) => void;
   onTaskDragStart: (taskId: string) => void;
@@ -26,8 +28,6 @@ interface CategorySectionProps {
   onTaskDrop: (taskId: string, category: Category) => void;
   onTaskOpen: (taskId: string) => void;
   onQuickClose: (taskId: string) => void;
-  onTaskSaveTitle?: (taskId: string, title: string) => void;
-  onTaskChangeCategory?: (taskId: string, category: Category) => void;
 }
 
 function CategorySection({
@@ -43,6 +43,7 @@ function CategorySection({
   isDropTarget,
   onDropTargetChange,
   onCreate,
+  onCategoryArchive,
   onCategoryColorChange,
   onCategoryRename,
   onTaskDragStart,
@@ -50,8 +51,6 @@ function CategorySection({
   onTaskDrop,
   onTaskOpen,
   onQuickClose,
-  onTaskSaveTitle,
-  onTaskChangeCategory,
 }: CategorySectionProps) {
   const [isEditingLabel, setIsEditingLabel] = useState(false);
   const [draftLabel, setDraftLabel] = useState(label);
@@ -237,6 +236,16 @@ function CategorySection({
           )}
         </h2>
         <span className="category-section__count">{tasks.length}</span>
+        <button
+          type="button"
+          className="category-section__archive-button has-tooltip has-tooltip--end"
+          data-tooltip="Переместить категорию в архив"
+          aria-label="Переместить категорию в архив"
+          title="Переместить категорию в архив"
+          onClick={() => onCategoryArchive(category)}
+        >
+          <Archive size={16} strokeWidth={1.9} aria-hidden="true" />
+        </button>
       </div>
 
       <div className="task-list">
@@ -252,8 +261,6 @@ function CategorySection({
               onDragEnd={onTaskDragEnd}
               onOpen={() => onTaskOpen(task.id)}
               onQuickClose={() => onQuickClose(task.id)}
-              onSaveTitle={onTaskSaveTitle}
-              onChangeCategory={onTaskChangeCategory}
               onTouchDragOver={onDropTargetChange}
               onTouchDrop={(nextCategory) => onTaskDrop(task.id, nextCategory)}
             />

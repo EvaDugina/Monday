@@ -63,6 +63,8 @@ export interface CategoryOption {
   key: Category;
   label: string;
   color: string;
+  status?: 'active' | 'archived';
+  archivedAt?: string;
 }
 
 export const CATEGORY_COLOR_PALETTE = [

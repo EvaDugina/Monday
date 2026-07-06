@@ -6,7 +6,7 @@
 - Владелец: команда проекта
 - Последнее обновление: 2026-07-06
 - Стадия проекта: `POC B`
-- Версия проекта: `v0.1.12`
+- Версия проекта: `v0.1.17`
 - Предыдущая версия: `не применимо`
 - Следующий целевой этап: `MVP A`
 - Архив финальной версии предыдущего этапа: `не применимо, каноническая пара документов вводится впервые`
@@ -73,7 +73,7 @@
 - `CategoryOption`: пользовательская секция доски с устойчивым ключом, названием и цветом.
 - `Deadline`: дедлайн задачи (`none`, `date`, `range`, `recurring`; weekly recurring использует `mode=week` и `weekday`).
 - `BackgroundDecoration`: локальная браузерная настройка фонового изображения с позицией на page-sized background layer и горизонтальным anchor от центра; не входит в серверный snapshot.
-- `WeatherPreference`: локальная браузерная настройка города для погодного виджета header.
+- `WeatherPreference`: локальная браузерная настройка выбранного id города для floating-погодного виджета.
 - `WeatherRainLayer`: client-only CSS overlay лёгкого дождя, включаемый погодным виджетом.
 - `ServerTasksState`: серверный снимок доски с `tasks`, `categories`, `updatedAt` и `version`.
 - `task_backups`: таблица резервных снимков с привязкой к пользователю-инициатору.
@@ -98,7 +98,8 @@
 - Docker Compose для локального и production-подъема
 - Caddy как reverse proxy в production
 - Authentik + PostgreSQL как внешний auth-layer
-- Open-Meteo Geocoding API и Forecast API как внешний клиентский источник погоды без API-ключа
+- Open-Meteo Forecast API как внешний клиентский источник погоды без API-ключа
+- Yandex Weather static light SVG icons как внешний источник погодных иконок
 
 ### 3.2. Основные модули и их ответственность
 
@@ -130,6 +131,15 @@
   - клик по `category-section__title` открывает inline input для переименования
   - клик по `category-section__dot` открывает native color picker
   - изменение названия или цвета участвует в localStorage persistence, optimistic sync и conflict detection
+  - archived-категории остаются в board snapshot, но исключаются из активной доски и create/category-picker
+  - архивирование категории проставляет `status='archived'`, `archivedAt` и закрывает открытые задачи этой категории тем же timestamp
+  - удаление категории доступно только с экрана архива и удаляет задачи этой категории вместе с category entry
+- Task row editing:
+  - `TaskItem` открывает модалку редактирования по клику на `task-card__title-cluster`
+  - inline input для заголовка в строке задачи не рендерится
+  - `TaskDetailsModal` показывает title как read-only текст; после создания задачи title не сохраняется из модалки
+  - `task-card__title-shell` ограничивает отображаемое название максимумом 90% ширины, а переполнение скрывается через ellipsis и full-title hover
+  - per-task category chip/button не рендерится; смена категории задачи выполняется через drag&drop между секциями
 - Backup:
   - UI вызывает `POST /api/backups`
   - API создает или переиспользует последний backup текущей версии
@@ -141,15 +151,19 @@
   - слой фона рендерится за доской как page-sized слой и прокручивается вместе со страницей без parallax-offset от pointer
   - отдельная floating-панель вне `app__inner` включает background edit-mode и очистку фона
   - в background edit-mode кнопка редактирования заменяется кнопкой сохранения изменений и выхода
-  - отдельный edit-mode поднимает слой над доской, включает pointer-drag изображений, resize-handle и кнопки удаления на frame картинки
+  - отдельный edit-mode поднимает слой над доской, включает pointer-drag изображений, edge/corner resize handles и кнопки удаления в правом верхнем углу самой картинки
   - новые координаты и размер сохраняются в `localStorage` после завершения pointer-drag, resize или при явном выходе из edit-mode
   - горизонтальная координата хранится как pixel offset от центра фонового слоя; старые процентные `left` без `anchor` мигрируются при чтении из `localStorage`
   - секции категорий используют CSS liquid glass-подложку (`backdrop-filter`, прозрачный фон, блики и граница) с минимальной белой заливкой для читаемости поверх фоновых изображений
 - Weather:
-  - header по умолчанию показывает температуру для Москвы
-  - город хранится в `localStorage` по ключу `monday:weather-city`
-  - клик по названию города открывает inline input для смены города
-  - клиент напрямую вызывает `https://geocoding-api.open-meteo.com/v1/search` для координат и `https://api.open-meteo.com/v1/forecast` для `current=temperature_2m,weather_code,precipitation,rain,showers`
+  - floating weather badge рендерится вне `app__inner` в левом верхнем углу
+  - выбранный город хранится в `localStorage` по ключу `monday:weather-city` как id из локального списка
+  - пользователь выбирает город через стилизованный native select, ручной ввод названия не используется
+  - локальный список городов включает `tbilisi`
+  - координаты города берутся из клиентского списка, без Open-Meteo Geocoding API
+  - клиент напрямую вызывает `https://api.open-meteo.com/v1/forecast` для `current=temperature_2m,weather_code,is_day,precipitation,rain,showers`
+  - `weather_code` и `is_day` мапятся на коды Yandex Weather icon set (`skc_d`, `bkn_ra_n`, `ovc_ts` и т.п.)
+  - итоговая иконка загружается как SVG из `https://yastatic.net/weather/i/icons/funky/light/{iconCode}.svg`
   - rain-layer включается, если `rain`, `showers` или `precipitation` больше нуля либо WMO `weather_code` относится к drizzle/rain/showers/thunderstorm
   - ошибки погоды не блокируют доску и отображаются только как fallback в weather badge
 - Hosted auth:
@@ -225,23 +239,25 @@
 - frontend `Task`:
   - `id`, `title`, `description`, `category`, `deadline`, `urgent`, `status`, `createdAt`, `closedAt?`
 - frontend `CategoryOption`:
-  - `key`, `label`, `color`
+  - `key`, `label`, `color`, `status?`, `archivedAt?`
   - `key` является стабильным строковым идентификатором категории и не меняется при переименовании
   - дефолтные категории: `passion`, `routine`, `body`, `projects`
   - пользовательские категории ограничены серверной валидацией по количеству, длине ключа/названия и формату цвета `#RRGGBB`
+  - отсутствие `status` означает активную категорию; archived-категория хранит `status='archived'` и ISO `archivedAt`
 - task row badges:
   - вычисляются на клиенте из существующих `urgent`, `pinned` и `deadline`
   - `urgent` badge и pin icon рендерятся слева от title; deadline/recurring badges рендерятся справа в той же строке
+  - title cluster открывает edit-modal, но title остается read-only после создания; отдельная category-chip кнопка в строке отсутствует
   - не добавляют новые поля в snapshot и не требуют миграции SQLite
 - frontend `BackgroundDecoration`:
   - `anchor`, `id`, `name`, `src`, `left`, `top`, `width`, `opacity`, `rotation`, `depth`
   - хранится в `localStorage` по ключу `monday:background-decorations`
   - `anchor='center'` означает, что `left` является пиксельным смещением центра изображения от середины фонового слоя
   - `top` остается процентной координатой изображения внутри page-sized background layer
-  - `width` меняется через resize-handle фонового изображения в background edit-mode
+  - `width` и опциональный `height` меняются через edge/corner resize handles фонового изображения в background edit-mode
   - ограничивается шестью изображениями и не сериализуется в `tasks_json`
 - frontend `WeatherPreference`:
-  - выбранный город хранится в `localStorage` по ключу `monday:weather-city`
+  - id выбранного города из локального списка хранится в `localStorage` по ключу `monday:weather-city`
   - значение не сериализуется в `tasks_json` и не попадает в backup
 - `LocalStateSnapshot`:
   - локальные `tasks`, `categories`, `version`, `updatedAt`
@@ -267,7 +283,7 @@
 ### 5.4. Контракты и совместимость
 
 - `category` является непустым строковым ключом категории длиной до 64 символов
-- `categories` в `PUT /api/tasks` содержит от 1 до 16 категорий с уникальными ключами, названием до 40 символов и цветом `#RRGGBB`
+- `categories` в `PUT /api/tasks` содержит от 1 до 16 категорий с уникальными ключами, названием до 40 символов, цветом `#RRGGBB`, опциональным `status='archived'` и опциональным ISO `archivedAt`
 - `status` ограничен `open | closed`
 - `urgent` обязателен как boolean
 - `deadline.kind='recurring'` поддерживает `mode='day' | 'week' | 'month'`; для `week` обязателен `weekday` от `0` до `6`
@@ -275,7 +291,8 @@
 - `PUT /api/tasks` использует optimistic concurrency и не делает merge при несовпадении версии
 - backup снимок не дублируется, если последняя сохраненная версия для пользователя уже совпадает с текущей
 - фоновые декорации не являются частью API-контракта и не должны попадать в `PUT /api/tasks`
-- погодный виджет не является частью API MONDAY; внешние запросы идут из браузера напрямую в Open-Meteo
+- погодный виджет не является частью API MONDAY; внешние forecast-запросы идут из браузера напрямую в Open-Meteo, а SVG-иконки загружаются с Yandex static host
+- hosted CSP должен разрешать `connect-src https://api.open-meteo.com` и `img-src https://yastatic.net`, иначе weather badge уходит в fallback
 
 ## 6. Окружения и конфигурация
 
@@ -436,18 +453,24 @@
   - создать по одной задаче минимум в двух разных категориях
   - отредактировать описание, дедлайн, еженедельный повтор, закрепление и срочность одной задачи
   - открыть модалку редактирования задачи и убедиться, что выбора категории в ней нет
+  - убедиться, что название в модалке отображается как read-only текст без поля ввода
   - убедиться, что `СРОЧНО` и символ закрепления находятся слева от названия, а дедлайн или повтор вроде `Каждый день` отображается badge справа от названия
-  - убедиться, что inline-редактирование заголовка не растягивает input на всю строку
+  - кликнуть по `task-card__title-cluster` и убедиться, что открылась модалка редактирования задачи
+  - убедиться, что inline-редактирование заголовка в строке не появляется, длинное название занимает не больше 90% строки и обрезается с троеточием
   - убедиться, что в header нет кнопок управления фоном и identity-строки пользователя
   - перетащить image-файл на страницу и убедиться, что он появился за доской, выглядит не блекло, а drag&drop задач после этого не сломан
-  - включить режим редактирования фона через floating-панель вне центральной колонки, убедиться, что кнопка редактирования стала кнопкой сохранения, перетащить изображение в другую область и изменить его размер
-  - убедиться, что позиция и размер изображения сохранились, а hover вне зон категорий слегка повышает яркость/контраст
+  - включить режим редактирования фона через floating-панель вне центральной колонки, убедиться, что кнопка редактирования стала кнопкой сохранения, перетащить изображение в другую область и растянуть его за правый край, нижний край и угол
+  - убедиться, что позиция, ширина и высота изображения сохранились, а hover вне зон категорий слегка повышает яркость/контраст
   - изменить ширину окна и убедиться, что изображение остается примерно в том же месте относительно центра доски
   - удалить одно изображение кнопкой в правом верхнем углу самой картинки
   - прокрутить страницу и убедиться, что фоновые изображения прокручиваются вместе с ней и не получают parallax-смещения от движения указателя
   - убедиться, что все видимые категории имеют прозрачную liquid glass-подложку и текст читается поверх загруженных изображений
   - очистить фон кнопкой во floating-панели
   - перетащить задачу в другую категорию
+  - убедиться, что цветовые акценты задачи сменились на цвет новой категории без box-shadow у самой task-card
+  - нажать кнопку архива у категории и подтвердить перенос категории с задачами в архив
+  - открыть архив, восстановить archived-категорию и убедиться, что она вернулась на активную доску
+  - снова отправить категорию в архив и удалить ее из архива
   - закрыть задачу и убедиться, что она появилась в архиве
   - восстановить задачу из архива
 - Ожидаемый результат:
@@ -596,11 +619,11 @@
 
 - Статус: approved
 - Контекст:
-  - пользователю нужна температура дня в header, но проект не должен добавлять серверные секреты или усложнять API ради вспомогательного UI-виджета.
+  - пользователю нужна температура дня в отдельном floating badge, но проект не должен добавлять серверные секреты или усложнять API ради вспомогательного UI-виджета.
 - Решение:
-  - использовать Open-Meteo напрямую из браузера: geocoding для города и forecast `current=temperature_2m` для температуры; выбранный город хранить в `localStorage`.
+  - использовать Open-Meteo Forecast напрямую из браузера: координаты брать из локального списка городов, forecast `current=temperature_2m,weather_code,is_day,precipitation,rain,showers` использовать для температуры, Yandex light-иконки и rain-overlay; выбранный город хранить в `localStorage`.
 - Последствия:
-  - сервер MONDAY, SQLite snapshot и backup не меняются; доступность погоды и rain-overlay зависят от внешнего API и клиентской сети.
+  - сервер MONDAY, SQLite snapshot и backup не меняются; доступность погоды, weather icon и rain-overlay зависят от внешних клиентских запросов и сети.
 - Связанные планы и требования:
   - `REQ-010`
 
@@ -621,3 +644,8 @@
 - `2026-07-06 | v0.1.10 | тип: UX+data | важность: важно в документации | категории перенесены в board snapshot: добавление секций, inline-переименование и смена цвета синхронизируются через existing optimistic concurrency`
 - `2026-07-06 | v0.1.11 | тип: UX+integration | важность: важно в документации | header получил client-only weather badge с Open-Meteo, локальным выбором города и fallback при ошибке внешнего API`
 - `2026-07-06 | v0.1.12 | тип: UX | важность: важно в документации | WeatherBadge стал отдавать rain state в App и включает лёгкий CSS rain-layer при дождливых current conditions`
+- `2026-07-06 | v0.1.13 | тип: UX+data | важность: важно в документации | CategoryOption расширен optional status/archivedAt, активный экран фильтрует archived-категории, архив стал местом восстановления и удаления категорий`
+- `2026-07-06 | v0.1.14 | тип: UX+integration | важность: важно в документации | WeatherBadge вынесен в root floating-layer вне app__inner, geocoding заменён выбором города из локального списка координат, WMO weather_code управляет цветной иконкой`
+- `2026-07-06 | v0.1.15 | тип: UX+integration | важность: важно в документации | WeatherBadge использует Yandex Weather light SVG icons: WMO weather_code и Open-Meteo is_day мапятся на Yandex iconCode`
+- `2026-07-06 | v0.1.16 | тип: UX+integration | важность: важно в документации | production CSP разрешает Open-Meteo и Yandex SVG, city select стилизован, добавлен Тбилиси, background resize хранит width/height`
+- `2026-07-06 | v0.1.17 | тип: UX | важность: важно в документации | TaskItem больше не рендерит inline title input и category-chip button; title cluster открывает edit-modal, title в edit-modal read-only, title shell расширен до 90% строки`

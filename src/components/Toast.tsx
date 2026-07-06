@@ -7,6 +7,7 @@ export interface ToastState {
   actionLabel?: string;
   onAction?: () => void;
   duration?: number;
+  slowDismiss?: boolean;
   tone?: 'success';
 }
 
@@ -40,7 +41,9 @@ function Toast({ toast, onDismiss }: ToastProps) {
 
   return (
     <div
-      className={`toast${toast.tone === 'success' ? ' toast--success' : ''}`}
+      className={`toast${toast.tone === 'success' ? ' toast--success' : ''}${
+        toast.slowDismiss ? ' toast--slow-dismiss' : ''
+      }`}
       role="status"
       aria-live="polite"
       key={toast.id}

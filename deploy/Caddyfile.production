@@ -19,7 +19,7 @@
 
 	header {
 		-Server
-		Content-Security-Policy "default-src 'self'; base-uri 'none'; frame-ancestors 'none'; object-src 'none'; form-action 'self' https://{$AUTH_DOMAIN}; img-src 'self' data:; font-src 'self'; style-src 'self'; script-src 'self'; connect-src 'self';"
+		Content-Security-Policy "default-src 'self'; base-uri 'none'; frame-ancestors 'none'; object-src 'none'; form-action 'self' https://{$AUTH_DOMAIN}; img-src 'self' data: https://yastatic.net; font-src 'self'; style-src 'self'; script-src 'self'; connect-src 'self' https://api.open-meteo.com;"
 		Permissions-Policy "camera=(), geolocation=(), microphone=()"
 		Referrer-Policy "no-referrer"
 		Strict-Transport-Security "max-age=86400"

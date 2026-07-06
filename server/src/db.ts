@@ -12,6 +12,8 @@ interface StoredCategory {
   key: string;
   label: string;
   color: string;
+  status?: 'active' | 'archived';
+  archivedAt?: string;
 }
 
 interface StoredBoardState {

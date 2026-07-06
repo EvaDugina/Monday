@@ -73,16 +73,28 @@ export function sanitizeCategories(categories: unknown, tasks: Task[] = []): Cat
     const key = typeof candidate.key === 'string' ? candidate.key.trim() : '';
     const label = typeof candidate.label === 'string' ? candidate.label.trim() : '';
     const color = typeof candidate.color === 'string' ? candidate.color.trim() : '';
+    const status = candidate.status === 'archived' ? 'archived' : 'active';
+    const archivedAt =
+      status === 'archived' && typeof candidate.archivedAt === 'string' && !Number.isNaN(Date.parse(candidate.archivedAt))
+        ? candidate.archivedAt
+        : undefined;
 
     if (!key || key.length > MAX_CATEGORY_KEY_LENGTH || seenKeys.has(key)) {
       return;
     }
 
-    nextCategories.push({
+    const category: CategoryOption = {
       key,
       label: label.slice(0, MAX_CATEGORY_LABEL_LENGTH) || key,
       color: HEX_COLOR_PATTERN.test(color) ? color : getFallbackCategoryColor(index),
-    });
+      status: status === 'archived' ? 'archived' : undefined,
+    };
+
+    if (archivedAt) {
+      category.archivedAt = archivedAt;
+    }
+
+    nextCategories.push(category);
     seenKeys.add(key);
   });
 
