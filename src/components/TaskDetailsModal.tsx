@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { useModalFocusTrap } from '../hooks/useModalFocusTrap';
 import type { Deadline, Task } from '../types';
-import { MAX_DESCRIPTION_LENGTH } from '../types';
+import { MAX_DESCRIPTION_LENGTH, MAX_TITLE_LENGTH } from '../types';
 import DeadlineEditor from './DeadlineEditor';
 
 interface TaskDetailsModalProps {
@@ -13,6 +13,7 @@ interface TaskDetailsModalProps {
 }
 
 interface Snapshot {
+  title: string;
   description: string;
   deadline: Deadline;
   urgent: boolean;
@@ -21,6 +22,7 @@ interface Snapshot {
 
 function takeSnapshot(task: Task): Snapshot {
   return {
+    title: task.title,
     description: task.description,
     deadline: task.deadline,
     urgent: task.urgent,
@@ -30,6 +32,7 @@ function takeSnapshot(task: Task): Snapshot {
 
 function isDirty(snapshot: Snapshot, current: Snapshot): boolean {
   return (
+    snapshot.title.trim() !== current.title.trim() ||
     snapshot.description.trim() !== current.description.trim() ||
     snapshot.urgent !== current.urgent ||
     snapshot.pinned !== current.pinned ||
@@ -38,6 +41,7 @@ function isDirty(snapshot: Snapshot, current: Snapshot): boolean {
 }
 
 function TaskDetailsModal({ task, onClose, onSave, onArchive, onDelete }: TaskDetailsModalProps) {
+  const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [deadline, setDeadline] = useState<Deadline>({ kind: 'none' });
   const [urgent, setUrgent] = useState(false);
@@ -52,6 +56,7 @@ function TaskDetailsModal({ task, onClose, onSave, onArchive, onDelete }: TaskDe
       return;
     }
 
+    setTitle(task.title);
     setDescription(task.description);
     setDeadline(task.deadline);
     setUrgent(task.urgent);
@@ -63,7 +68,7 @@ function TaskDetailsModal({ task, onClose, onSave, onArchive, onDelete }: TaskDe
     const snapshot = initialSnapshotRef.current;
 
     if (snapshot) {
-      const current: Snapshot = { description, deadline, urgent, pinned };
+      const current: Snapshot = { title, description, deadline, urgent, pinned };
 
       if (isDirty(snapshot, current)) {
         const shouldDiscard = window.confirm('Закрыть без сохранения изменений?');
@@ -74,7 +79,7 @@ function TaskDetailsModal({ task, onClose, onSave, onArchive, onDelete }: TaskDe
     }
 
     onClose();
-  }, [description, deadline, urgent, pinned, onClose]);
+  }, [title, description, deadline, urgent, pinned, onClose]);
 
   useEffect(() => {
     if (!task) {
@@ -98,9 +103,16 @@ function TaskDetailsModal({ task, onClose, onSave, onArchive, onDelete }: TaskDe
   const currentTask = task;
 
   function handleSave() {
+    const trimmedTitle = title.trim();
+
+    if (!trimmedTitle) {
+      window.alert('Название задачи не может быть пустым.');
+      return;
+    }
+
     onSave({
       ...currentTask,
-      title: currentTask.title,
+      title: trimmedTitle,
       description: description.trim(),
       deadline,
       urgent,
@@ -158,9 +170,14 @@ function TaskDetailsModal({ task, onClose, onSave, onArchive, onDelete }: TaskDe
                 </button>
               </div>
             </div>
-            <p className="task-details__title" title={currentTask.title}>
-              {currentTask.title}
-            </p>
+            <input
+              className="text-input task-details__title-input"
+              type="text"
+              value={title}
+              maxLength={MAX_TITLE_LENGTH}
+              onChange={(event) => setTitle(event.target.value)}
+              placeholder="Название задачи"
+            />
           </div>
 
           <label className="form-field">

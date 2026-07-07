@@ -1,10 +1,10 @@
 import { useEffect, useRef } from 'react';
 import { withAppBasePath } from '../basePath';
+import type { RainIntensity } from '../types';
 
 const VENDOR_SRC = withAppBasePath('/vendor/raindrop-fx/index.js');
 const SCRIPT_ID = 'monday-raindrop-fx';
 const MAX_RAIN_FX_OPACITY = 0.42;
-const FALLBACK_BASE_DROP_COUNT = 130;
 
 type RainFxOptions = {
   canvas: HTMLCanvasElement;
@@ -35,6 +35,86 @@ type FallbackRainController = {
   resize: () => void;
   stop: () => void;
 };
+
+type VisibleRainIntensity = Exclude<RainIntensity, 'none'>;
+
+type RainVisualProfile = {
+  dropletsPerSecond: number;
+  fallbackDropCount: number;
+  fallbackOpacity: number;
+  fallbackAlpha: [number, number];
+  fallbackLength: [number, number];
+  fallbackSpeed: [number, number];
+  fallbackWidth: [number, number];
+  fxOpacity: number;
+  mistAlpha: number;
+  spawnInterval: [number, number];
+  spawnLimit: number;
+  spawnSize: [number, number];
+};
+
+const RAIN_VISUAL_PROFILES: Record<VisibleRainIntensity, RainVisualProfile> = {
+  light: {
+    dropletsPerSecond: 280,
+    fallbackDropCount: 44,
+    fallbackOpacity: 0.12,
+    fallbackAlpha: [0.08, 0.18],
+    fallbackLength: [10, 24],
+    fallbackSpeed: [5, 10],
+    fallbackWidth: [0.45, 1],
+    fxOpacity: 0.14,
+    mistAlpha: 0.16,
+    spawnInterval: [0.08, 0.16],
+    spawnLimit: 320,
+    spawnSize: [18, 46],
+  },
+  moderate: {
+    dropletsPerSecond: 620,
+    fallbackDropCount: 76,
+    fallbackOpacity: 0.2,
+    fallbackAlpha: [0.12, 0.28],
+    fallbackLength: [13, 34],
+    fallbackSpeed: [7, 14],
+    fallbackWidth: [0.6, 1.35],
+    fxOpacity: 0.24,
+    mistAlpha: 0.28,
+    spawnInterval: [0.04, 0.1],
+    spawnLimit: 700,
+    spawnSize: [24, 68],
+  },
+  heavy: {
+    dropletsPerSecond: 960,
+    fallbackDropCount: 104,
+    fallbackOpacity: 0.29,
+    fallbackAlpha: [0.16, 0.38],
+    fallbackLength: [15, 44],
+    fallbackSpeed: [8, 18],
+    fallbackWidth: [0.7, 1.65],
+    fxOpacity: 0.34,
+    mistAlpha: 0.4,
+    spawnInterval: [0.026, 0.07],
+    spawnLimit: 1020,
+    spawnSize: [32, 86],
+  },
+  max: {
+    dropletsPerSecond: 1300,
+    fallbackDropCount: 130,
+    fallbackOpacity: 0.36,
+    fallbackAlpha: [0.18, 0.46],
+    fallbackLength: [16, 50],
+    fallbackSpeed: [9, 21],
+    fallbackWidth: [0.8, 2],
+    fxOpacity: MAX_RAIN_FX_OPACITY,
+    mistAlpha: 0.48,
+    spawnInterval: [0.018, 0.05],
+    spawnLimit: 1300,
+    spawnSize: [38, 104],
+  },
+};
+
+interface WeatherRainEffectProps {
+  intensity: RainIntensity;
+}
 
 declare global {
   interface Window {
@@ -171,22 +251,39 @@ type FallbackDrop = {
   drift: number;
 };
 
-function createFallbackDrop(width: number, height: number, randomizeY: boolean): FallbackDrop {
-  const length = 16 + Math.random() * 34;
-  const speed = 9 + Math.random() * 12;
+function getRainVisualProfile(intensity: RainIntensity): RainVisualProfile {
+  if (intensity === 'none') {
+    return RAIN_VISUAL_PROFILES.light;
+  }
+
+  return RAIN_VISUAL_PROFILES[intensity];
+}
+
+function randomRange([min, max]: [number, number]): number {
+  return min + Math.random() * (max - min);
+}
+
+function createFallbackDrop(
+  width: number,
+  height: number,
+  randomizeY: boolean,
+  profile: RainVisualProfile,
+): FallbackDrop {
+  const length = randomRange(profile.fallbackLength);
+  const speed = randomRange(profile.fallbackSpeed);
 
   return {
     x: Math.random() * width,
     y: randomizeY ? Math.random() * height : -length,
     length,
     speed,
-    alpha: 0.18 + Math.random() * 0.28,
-    width: 0.8 + Math.random() * 1.2,
+    alpha: randomRange(profile.fallbackAlpha),
+    width: randomRange(profile.fallbackWidth),
     drift: 0.24 + Math.random() * 0.18,
   };
 }
 
-function startFallbackRain(canvas: HTMLCanvasElement): FallbackRainController | null {
+function startFallbackRain(canvas: HTMLCanvasElement, profile: RainVisualProfile): FallbackRainController | null {
   const context = canvas.getContext('2d');
   if (!context) {
     return null;
@@ -208,8 +305,8 @@ function startFallbackRain(canvas: HTMLCanvasElement): FallbackRainController | 
     context.setTransform(dpr, 0, 0, dpr, 0, 0);
 
     const density = Math.min(1.6, Math.max(0.8, (width * height) / (1280 * 720)));
-    const count = Math.round(FALLBACK_BASE_DROP_COUNT * density);
-    drops = Array.from({ length: count }, () => createFallbackDrop(width, height, true));
+    const count = Math.round(profile.fallbackDropCount * density);
+    drops = Array.from({ length: count }, () => createFallbackDrop(width, height, true, profile));
   };
 
   const render = (time: number) => {
@@ -231,7 +328,7 @@ function startFallbackRain(canvas: HTMLCanvasElement): FallbackRainController | 
       drop.y += drop.speed * delta;
 
       if (drop.y - drop.length > height || drop.x < -drop.length) {
-        Object.assign(drop, createFallbackDrop(width, height, false));
+        Object.assign(drop, createFallbackDrop(width, height, false, profile));
         drop.x = Math.random() * (width + 80);
       }
     }
@@ -248,11 +345,12 @@ function startFallbackRain(canvas: HTMLCanvasElement): FallbackRainController | 
   };
 }
 
-function WeatherRainEffect() {
+function WeatherRainEffect({ intensity }: WeatherRainEffectProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const fallbackCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const rainFxRef = useRef<RainFxInstance | null>(null);
   const fallbackRef = useRef<FallbackRainController | null>(null);
+  const rainProfile = getRainVisualProfile(intensity);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -282,13 +380,13 @@ function WeatherRainEffect() {
         const instance = new RaindropFX({
           canvas: rainCanvas,
           background: createRainBackground(rainCanvas),
-          dropletsPerSecond: 1300,
-          dropletsPerSeconds: 1300,
-          spawnInterval: [0.018, 0.05],
-          spawnSize: [38, 104],
-          spawnLimit: 1300,
+          dropletsPerSecond: rainProfile.dropletsPerSecond,
+          dropletsPerSeconds: rainProfile.dropletsPerSecond,
+          spawnInterval: rainProfile.spawnInterval,
+          spawnSize: rainProfile.spawnSize,
+          spawnLimit: rainProfile.spawnLimit,
           mist: true,
-          mistColor: [0.04, 0.04, 0.05, 0.48],
+          mistColor: [0.04, 0.04, 0.05, rainProfile.mistAlpha],
           backgroundBlurSteps: 3,
           raindropCompose: 'harder',
           raindropDiffuseLight: [0.42, 0.42, 0.44],
@@ -303,7 +401,7 @@ function WeatherRainEffect() {
           return;
         }
 
-        setRainOpacity(rainCanvas, MAX_RAIN_FX_OPACITY);
+        setRainOpacity(rainCanvas, rainProfile.fxOpacity);
         setRainOpacity(fallbackRainCanvas, 0);
       } catch {
         if (isCancelled) {
@@ -311,9 +409,9 @@ function WeatherRainEffect() {
         }
 
         resizeCanvasToCssPixels(fallbackRainCanvas);
-        fallbackRef.current = startFallbackRain(fallbackRainCanvas);
+        fallbackRef.current = startFallbackRain(fallbackRainCanvas, rainProfile);
         setRainOpacity(rainCanvas, 0);
-        setRainOpacity(fallbackRainCanvas, fallbackRef.current ? 0.36 : 0);
+        setRainOpacity(fallbackRainCanvas, fallbackRef.current ? rainProfile.fallbackOpacity : 0);
       }
     }
 
@@ -344,7 +442,7 @@ function WeatherRainEffect() {
       fallbackRef.current?.stop();
       fallbackRef.current = null;
     };
-  }, []);
+  }, [rainProfile]);
 
   return (
     <div className="weather-rain" aria-hidden="true">

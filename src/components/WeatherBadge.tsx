@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { buildApiPath, withAppBasePath } from '../basePath';
+import type { RainIntensity } from '../types';
 
 const WEATHER_CITY_STORAGE_KEY = 'monday:weather-city';
 const DEFAULT_CITY_ID = 'moscow';
@@ -32,27 +33,16 @@ interface ForecastResponse {
 }
 
 interface WeatherBadgeProps {
-  onRainChange?: (isRainy: boolean) => void;
+  onRainIntensityChange?: (rainIntensity: RainIntensity) => void;
 }
 
-const RAINY_WEATHER_CODES = new Set([
-  51,
-  53,
-  55,
-  56,
-  57,
-  61,
-  63,
-  65,
-  66,
-  67,
-  80,
-  81,
-  82,
-  95,
-  96,
-  99,
-]);
+const RAIN_INTENSITY_RANK: Record<RainIntensity, number> = {
+  none: 0,
+  light: 1,
+  moderate: 2,
+  heavy: 3,
+  max: 4,
+};
 
 function findCityOption(value: string | null): WeatherCityOption {
   const normalized = value?.trim().toLowerCase();
@@ -85,16 +75,66 @@ function formatTemperature(value: number): string {
   return `${rounded > 0 ? '+' : ''}${rounded}°`;
 }
 
-function isRainyForecast(current: ForecastResponse['current']): boolean {
+function maxRainIntensity(left: RainIntensity, right: RainIntensity): RainIntensity {
+  return RAIN_INTENSITY_RANK[right] > RAIN_INTENSITY_RANK[left] ? right : left;
+}
+
+function getPrecipitationRainIntensity(precipitation: number | undefined): RainIntensity {
+  if (typeof precipitation !== 'number' || precipitation <= 0) {
+    return 'none';
+  }
+
+  if (precipitation >= 7.5) {
+    return 'max';
+  }
+
+  if (precipitation >= 2.5) {
+    return 'heavy';
+  }
+
+  if (precipitation >= 0.8) {
+    return 'moderate';
+  }
+
+  return 'light';
+}
+
+function getWeatherCodeRainIntensity(weatherCode: number | undefined): RainIntensity {
+  if (typeof weatherCode !== 'number') {
+    return 'none';
+  }
+
+  if (weatherCode === 51 || weatherCode === 56 || weatherCode === 61 || weatherCode === 66 || weatherCode === 80) {
+    return 'light';
+  }
+
+  if (weatherCode === 53 || weatherCode === 55 || weatherCode === 57 || weatherCode === 63 || weatherCode === 81) {
+    return 'moderate';
+  }
+
+  if (
+    weatherCode === 65 ||
+    weatherCode === 67 ||
+    weatherCode === 82 ||
+    weatherCode === 95 ||
+    weatherCode === 96 ||
+    weatherCode === 99
+  ) {
+    return 'max';
+  }
+
+  return 'none';
+}
+
+function getForecastRainIntensity(current: ForecastResponse['current']): RainIntensity {
   if (!current) {
-    return false;
+    return 'none';
   }
 
-  if ((current.precipitation ?? 0) > 0) {
-    return true;
-  }
-
-  return typeof current.weather_code === 'number' && RAINY_WEATHER_CODES.has(current.weather_code);
+  return maxRainIntensity(
+    getPrecipitationRainIntensity(current.precipitation),
+    getWeatherCodeRainIntensity(current.weather_code),
+  );
 }
 
 function getDayNightSuffix(isDay: boolean | null): 'd' | 'n' {
@@ -179,7 +219,7 @@ function getWeatherVisual(
 async function fetchWeather(
   city: WeatherCityOption,
   signal: AbortSignal,
-): Promise<{ isDay: boolean | null; isRainy: boolean; temperature: string; weatherCode: number | null }> {
+): Promise<{ isDay: boolean | null; rainIntensity: RainIntensity; temperature: string; weatherCode: number | null }> {
   const forecastUrl = new URL(buildApiPath('weather/current'), window.location.origin);
   forecastUrl.searchParams.set('latitude', String(city.latitude));
   forecastUrl.searchParams.set('longitude', String(city.longitude));
@@ -205,14 +245,14 @@ async function fetchWeather(
       typeof forecastPayload.current?.is_day === 'number'
         ? forecastPayload.current.is_day === 1
         : null,
-    isRainy: isRainyForecast(forecastPayload.current),
+    rainIntensity: getForecastRainIntensity(forecastPayload.current),
     temperature: formatTemperature(temperature),
     weatherCode:
       typeof forecastPayload.current?.weather_code === 'number' ? forecastPayload.current.weather_code : null,
   };
 }
 
-function WeatherBadge({ onRainChange }: WeatherBadgeProps) {
+function WeatherBadge({ onRainIntensityChange }: WeatherBadgeProps) {
   const [cityId, setCityId] = useState(loadWeatherCityId);
   const selectedCity = findCityOption(cityId);
   const [temperature, setTemperature] = useState<string | null>(null);
@@ -231,7 +271,7 @@ function WeatherBadge({ onRainChange }: WeatherBadgeProps) {
 
     setIsLoading(true);
     setHasError(false);
-    onRainChange?.(false);
+    onRainIntensityChange?.('none');
 
     void fetchWeather(selectedCity, controller.signal)
       .then((result) => {
@@ -242,7 +282,7 @@ function WeatherBadge({ onRainChange }: WeatherBadgeProps) {
         setTemperature(result.temperature);
         setWeatherCode(result.weatherCode);
         setIsDay(result.isDay);
-        onRainChange?.(result.isRainy);
+        onRainIntensityChange?.(result.rainIntensity);
       })
       .catch(() => {
         if (!isActive) {
@@ -253,7 +293,7 @@ function WeatherBadge({ onRainChange }: WeatherBadgeProps) {
         setTemperature(null);
         setWeatherCode(null);
         setIsDay(null);
-        onRainChange?.(false);
+        onRainIntensityChange?.('none');
       })
       .finally(() => {
         window.clearTimeout(timeoutId);
@@ -268,7 +308,7 @@ function WeatherBadge({ onRainChange }: WeatherBadgeProps) {
       window.clearTimeout(timeoutId);
       controller.abort();
     };
-  }, [onRainChange, selectedCity]);
+  }, [onRainIntensityChange, selectedCity]);
 
   useEffect(() => {
     if (!isCityMenuOpen) {

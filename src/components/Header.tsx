@@ -33,11 +33,9 @@ function Header({
       ? 'Синхронно'
       : syncStatus === 'syncing'
         ? 'Сохраняем'
-        : syncStatus === 'conflict'
-          ? 'Конфликт'
-          : syncStatus === 'invalid'
-            ? 'Ошибка данных'
-            : 'Оффлайн';
+        : syncStatus === 'invalid'
+          ? 'Ошибка данных'
+          : 'Оффлайн';
 
   return (
     <header className="header">

@@ -21,6 +21,8 @@ export interface Task {
 
 export type Screen = 'active' | 'archive';
 
+export type RainIntensity = 'none' | 'light' | 'moderate' | 'heavy' | 'max';
+
 export interface ServerTasksState {
   categories: CategoryOption[];
   tasks: Task[];
@@ -57,7 +59,7 @@ export const MAX_CATEGORIES = 16;
 export const MAX_CATEGORY_KEY_LENGTH = 64;
 export const MAX_CATEGORY_LABEL_LENGTH = 40;
 
-export type SyncStatus = 'synced' | 'syncing' | 'offline' | 'conflict' | 'invalid';
+export type SyncStatus = 'synced' | 'syncing' | 'offline' | 'invalid';
 
 export interface CategoryOption {
   key: Category;

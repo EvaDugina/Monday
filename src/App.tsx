@@ -1,5 +1,5 @@
 import { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react';
-import { Check, Palette } from 'lucide-react';
+import { Check, Save } from 'lucide-react';
 import {
   ApiError,
   createBackupSnapshot,
@@ -17,7 +17,6 @@ import CategorySection from './components/CategorySection';
 import Header from './components/Header';
 import InlineCreator from './components/InlineCreator';
 import LoginScreen from './components/LoginScreen';
-import SearchBar from './components/SearchBar';
 import Toast, { ToastState } from './components/Toast';
 import WeatherBadge from './components/WeatherBadge';
 import WeatherRainEffect from './components/WeatherRainEffect';
@@ -33,6 +32,7 @@ import type {
   CategoryOption,
   CurrentUser,
   Deadline,
+  RainIntensity,
   Screen,
   ServerTasksState,
   SyncStatus,
@@ -310,27 +310,133 @@ function formatBackupTooltip(result: BackupSnapshotResponse): string {
   return `${actionLabel}: ${backupTime}. Снимок состояния: ${snapshotTime}. Храним последние ${result.retainedBackups} бэкапа на пользователя.`;
 }
 
-function shouldPreserveLocalSnapshot(params: {
-  lastSyncedJson: string | null;
-  localHasChanges: boolean;
-  localJson: string;
-  serverJson: string;
-}): boolean {
-  const { lastSyncedJson, localHasChanges, localJson, serverJson } = params;
-
-  if (!localHasChanges || localJson === serverJson) {
-    return false;
-  }
-
-  if (lastSyncedJson === null) {
-    return true;
-  }
-
-  return localJson !== lastSyncedJson;
+interface BoardSnapshot {
+  categories: CategoryOption[];
+  tasks: Task[];
 }
 
-function getDefaultBoardJson(): string {
-  return serializeBoardState([], CATEGORIES);
+function areSerializedEqual(left: unknown, right: unknown): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
+function parseBoardSnapshotJson(value: string | null): BoardSnapshot | null {
+  if (!value) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(value);
+    const rawTasks = Array.isArray(parsed)
+      ? parsed
+      : typeof parsed === 'object' && parsed !== null
+        ? (parsed as { tasks?: unknown }).tasks
+        : [];
+    const tasks = sanitizeTasks(Array.isArray(rawTasks) ? (rawTasks as Task[]) : []);
+    const rawCategories =
+      typeof parsed === 'object' && parsed !== null ? (parsed as { categories?: unknown }).categories : CATEGORIES;
+
+    return {
+      categories: sanitizeCategories(rawCategories, tasks),
+      tasks,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function getServerBoardSnapshot(serverState: ServerTasksState): BoardSnapshot {
+  const tasks = sanitizeTasks(serverState.tasks);
+
+  return {
+    categories: sanitizeCategories(serverState.categories, tasks),
+    tasks,
+  };
+}
+
+function mergeTasks(baseTasks: Task[], localTasks: Task[], serverTasks: Task[]): Task[] {
+  const baseById = new Map(baseTasks.map((task) => [task.id, task]));
+  const localById = new Map(localTasks.map((task) => [task.id, task]));
+  const localDeletedIds = new Set(baseTasks.filter((task) => !localById.has(task.id)).map((task) => task.id));
+  const localChangedById = new Map(
+    localTasks
+      .filter((task) => {
+        const baseTask = baseById.get(task.id);
+        return !baseTask || !areSerializedEqual(task, baseTask);
+      })
+      .map((task) => [task.id, task]),
+  );
+  const mergedTasks: Task[] = [];
+  const addedTaskIds = new Set<string>();
+
+  for (const task of serverTasks) {
+    if (localDeletedIds.has(task.id)) {
+      continue;
+    }
+
+    const localTask = localChangedById.get(task.id);
+    const mergedTask = localTask ?? task;
+    mergedTasks.push(mergedTask);
+    addedTaskIds.add(mergedTask.id);
+  }
+
+  for (const task of localTasks) {
+    if (localChangedById.has(task.id) && !addedTaskIds.has(task.id)) {
+      mergedTasks.push(task);
+    }
+  }
+
+  return sanitizeTasks(mergedTasks);
+}
+
+function mergeCategories(
+  baseCategories: CategoryOption[],
+  localCategories: CategoryOption[],
+  serverCategories: CategoryOption[],
+  tasks: Task[],
+): CategoryOption[] {
+  const baseByKey = new Map(baseCategories.map((category) => [category.key, category]));
+  const localByKey = new Map(localCategories.map((category) => [category.key, category]));
+  const localDeletedKeys = new Set(
+    baseCategories.filter((category) => !localByKey.has(category.key)).map((category) => category.key),
+  );
+  const localChangedByKey = new Map(
+    localCategories
+      .filter((category) => {
+        const baseCategory = baseByKey.get(category.key);
+        return !baseCategory || !areSerializedEqual(category, baseCategory);
+      })
+      .map((category) => [category.key, category]),
+  );
+  const mergedCategories: CategoryOption[] = [];
+  const addedCategoryKeys = new Set<string>();
+
+  for (const category of serverCategories) {
+    if (localDeletedKeys.has(category.key)) {
+      continue;
+    }
+
+    const localCategory = localChangedByKey.get(category.key);
+    const mergedCategory = localCategory ?? category;
+    mergedCategories.push(mergedCategory);
+    addedCategoryKeys.add(mergedCategory.key);
+  }
+
+  for (const category of localCategories) {
+    if (localChangedByKey.has(category.key) && !addedCategoryKeys.has(category.key)) {
+      mergedCategories.push(category);
+    }
+  }
+
+  return sanitizeCategories(mergedCategories, tasks);
+}
+
+function mergeBoardSnapshots(base: BoardSnapshot, local: BoardSnapshot, server: BoardSnapshot): BoardSnapshot {
+  const tasks = mergeTasks(base.tasks, local.tasks, server.tasks);
+
+  return {
+    categories: mergeCategories(base.categories, local.categories, server.categories, tasks),
+    tasks,
+  };
 }
 
 function createCategoryKey(label: string, categories: CategoryOption[]): Category {
@@ -385,7 +491,6 @@ function App() {
   const [dropTargetCategory, setDropTargetCategory] = useState<Category | null>(null);
   const [closingTaskIds, setClosingTaskIds] = useState<string[]>([]);
   const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
-  const [conflictState, setConflictState] = useState<ServerTasksState | null>(null);
   const [syncStatus, setSyncStatus] = useState<SyncStatus>('offline');
   const [syncTooltip, setSyncTooltip] = useState(LOGIN_REQUIRED_TOOLTIP);
   const [backupTooltip, setBackupTooltip] = useState(DEFAULT_BACKUP_TOOLTIP);
@@ -394,25 +499,27 @@ function App() {
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [toast, setToast] = useState<ToastState | null>(null);
   const [isInitialLoading, setIsInitialLoading] = useState(true);
-  const [searchQuery, setSearchQuery] = useState('');
   const [backgroundDecorations, setBackgroundDecorations] = useState<BackgroundDecoration[]>(() =>
     loadBackgroundDecorations(),
   );
   const [isBackgroundEditMode, setIsBackgroundEditMode] = useState(false);
   const [isBackgroundSaveConfirmed, setIsBackgroundSaveConfirmed] = useState(false);
   const [isBackgroundDragActive, setIsBackgroundDragActive] = useState(false);
-  const [isRainyWeather, setIsRainyWeather] = useState(false);
+  const [weatherRainIntensity, setWeatherRainIntensity] = useState<RainIntensity>('none');
   const [rainOverride, setRainOverride] = useState<boolean | null>(null);
   const latestTasksRef = useRef(tasks);
   const latestCategoriesRef = useRef(categories);
   const backgroundDecorationsRef = useRef(backgroundDecorations);
   const serverVersionRef = useRef(serverVersion);
+  const serverUpdatedAtRef = useRef(serverUpdatedAt);
   const syncStatusRef = useRef<SyncStatus>(syncStatus);
-  const conflictStateRef = useRef<ServerTasksState | null>(conflictState);
   const lastSyncedJsonRef = useRef<string | null>(initialState.lastSyncedJson);
   const lastBackedUpVersionRef = useRef<number | null>(null);
   const hasInitializedSyncRef = useRef(false);
   const backupInFlightRef = useRef(false);
+  const syncInFlightRef = useRef(false);
+  const syncRerunRequestedRef = useRef(false);
+  const syncCompletionRef = useRef<Promise<void> | null>(null);
   const closingTimeoutsRef = useRef<Record<string, number>>({});
   const backgroundSaveConfirmTimeoutRef = useRef<number | null>(null);
   const dragPointerYRef = useRef<number | null>(null);
@@ -618,7 +725,6 @@ function App() {
     setCurrentUser(null);
     setAuthStatus('unauthenticated');
     setAuthError(errorMessage);
-    setConflictState(null);
     setSelectedTaskId(null);
     setCreateModalOpen(false);
     setDraggedTaskId(null);
@@ -651,12 +757,12 @@ function App() {
   }, [serverVersion]);
 
   useEffect(() => {
-    syncStatusRef.current = syncStatus;
-  }, [syncStatus]);
+    serverUpdatedAtRef.current = serverUpdatedAt;
+  }, [serverUpdatedAt]);
 
   useEffect(() => {
-    conflictStateRef.current = conflictState;
-  }, [conflictState]);
+    syncStatusRef.current = syncStatus;
+  }, [syncStatus]);
 
   useEffect(() => {
     saveLocalState({
@@ -753,53 +859,18 @@ function App() {
           return;
         }
 
-        const serverTasks = sanitizeTasks(serverState.tasks);
-        const serverCategories = sanitizeCategories(serverState.categories, serverTasks);
+        const { categories: serverCategories, tasks: serverTasks } = getServerBoardSnapshot(serverState);
         const serverJson = serializeBoardState(serverTasks, serverCategories);
-        const localTasks = latestTasksRef.current;
-        const localCategories = latestCategoriesRef.current;
-        const localJson = serializeBoardState(localTasks, localCategories);
-        const localHasChanges = localJson !== getDefaultBoardJson();
 
-        if (serverTasks.length === 0 && localHasChanges && serverJson === getDefaultBoardJson()) {
-          const seededState = await pushTasksToServer(localTasks, localCategories, serverState.version);
-
-          if (isCancelled) {
-            return;
-          }
-
-          lastSyncedJsonRef.current = localJson;
-          setServerVersion(seededState.version);
-          setServerUpdatedAt(seededState.updatedAt);
-          setConflictState(null);
-          setSyncStatus('synced');
-          setSyncTooltip(formatSyncedTooltip(seededState.updatedAt));
-          return;
-        }
-
-        if (
-          shouldPreserveLocalSnapshot({
-            lastSyncedJson: initialState.lastSyncedJson,
-            localHasChanges,
-            localJson,
-            serverJson,
-          })
-        ) {
-          lastSyncedJsonRef.current = serverJson;
-          setServerVersion(serverState.version);
-          setServerUpdatedAt(serverState.updatedAt);
-          setConflictState(serverState);
-          setSyncStatus('conflict');
-          setSyncTooltip('Локальная версия отличается от серверной. Разрешите конфликт перед следующей записью.');
-          return;
-        }
-
+        latestTasksRef.current = serverTasks;
+        latestCategoriesRef.current = serverCategories;
         setTasks(serverTasks);
         setCategories(serverCategories);
         lastSyncedJsonRef.current = serverJson;
+        serverVersionRef.current = serverState.version;
+        serverUpdatedAtRef.current = serverState.updatedAt;
         setServerVersion(serverState.version);
         setServerUpdatedAt(serverState.updatedAt);
-        setConflictState(null);
         setSyncStatus('synced');
         setSyncTooltip(formatSyncedTooltip(serverState.updatedAt));
       } catch (error) {
@@ -827,12 +898,12 @@ function App() {
     return () => {
       isCancelled = true;
     };
-  }, [authStatus, initialState.lastSyncedJson]);
+  }, [authStatus]);
 
   async function waitForPendingSync(timeoutMs = 8_000): Promise<boolean> {
     const startedAt = Date.now();
 
-    while (syncStatusRef.current === 'syncing') {
+    while (syncStatusRef.current === 'syncing' || syncInFlightRef.current) {
       if (Date.now() - startedAt >= timeoutMs) {
         return false;
       }
@@ -843,49 +914,149 @@ function App() {
     return true;
   }
 
+  async function saveBoardSnapshotToServer(localSnapshot: BoardSnapshot): Promise<void> {
+    let nextSnapshot = localSnapshot;
+    let baseSnapshot =
+      parseBoardSnapshotJson(lastSyncedJsonRef.current) ?? {
+        categories: CATEGORIES,
+        tasks: [],
+      };
+    const initialLocalJson = serializeBoardState(localSnapshot.tasks, localSnapshot.categories);
+
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      const nextJson = serializeBoardState(nextSnapshot.tasks, nextSnapshot.categories);
+
+      try {
+        const nextState = await pushTasksToServer(
+          nextSnapshot.tasks,
+          nextSnapshot.categories,
+          serverVersionRef.current ?? 0,
+        );
+        const currentJson = serializeBoardState(latestTasksRef.current, latestCategoriesRef.current);
+
+        lastSyncedJsonRef.current = nextJson;
+        serverVersionRef.current = nextState.version;
+        serverUpdatedAtRef.current = nextState.updatedAt;
+        setServerVersion(nextState.version);
+        setServerUpdatedAt(nextState.updatedAt);
+
+        if (nextJson !== initialLocalJson) {
+          if (currentJson === initialLocalJson) {
+            latestTasksRef.current = nextSnapshot.tasks;
+            latestCategoriesRef.current = nextSnapshot.categories;
+            setTasks(nextSnapshot.tasks);
+            setCategories(nextSnapshot.categories);
+          } else {
+            const currentSnapshot: BoardSnapshot = {
+              categories: latestCategoriesRef.current,
+              tasks: latestTasksRef.current,
+            };
+            const nextLocalSnapshot = mergeBoardSnapshots(localSnapshot, currentSnapshot, nextSnapshot);
+            const nextLocalJson = serializeBoardState(nextLocalSnapshot.tasks, nextLocalSnapshot.categories);
+
+            if (nextLocalJson !== currentJson) {
+              latestTasksRef.current = nextLocalSnapshot.tasks;
+              latestCategoriesRef.current = nextLocalSnapshot.categories;
+              setTasks(nextLocalSnapshot.tasks);
+              setCategories(nextLocalSnapshot.categories);
+              syncRerunRequestedRef.current = true;
+            }
+          }
+        }
+
+        setSyncStatus('synced');
+        setSyncTooltip(formatSyncedTooltip(nextState.updatedAt));
+        return;
+      } catch (error) {
+        if (!(error instanceof ApiError && error.status === 409 && isConflictStatePayload(error.payload))) {
+          throw error;
+        }
+
+        const serverSnapshot = getServerBoardSnapshot(error.payload);
+        const mergedSnapshot = mergeBoardSnapshots(baseSnapshot, nextSnapshot, serverSnapshot);
+
+        baseSnapshot = serverSnapshot;
+        nextSnapshot = mergedSnapshot;
+        serverVersionRef.current = error.payload.version;
+        serverUpdatedAtRef.current = error.payload.updatedAt;
+        setServerVersion(error.payload.version);
+        setServerUpdatedAt(error.payload.updatedAt);
+        setSyncStatus('syncing');
+        setSyncTooltip('Сервер обновился, сохраняем ваши изменения поверх свежей версии…');
+      }
+    }
+
+    throw new Error('Failed to save board after server refresh retries');
+  }
+
+  async function syncLatestBoardToServer(): Promise<void> {
+    if (syncInFlightRef.current) {
+      syncRerunRequestedRef.current = true;
+      return syncCompletionRef.current ?? Promise.resolve();
+    }
+
+    const runner = (async () => {
+      syncInFlightRef.current = true;
+
+      try {
+        do {
+          syncRerunRequestedRef.current = false;
+
+          const nextSnapshot: BoardSnapshot = {
+            categories: latestCategoriesRef.current,
+            tasks: latestTasksRef.current,
+          };
+          const nextJson = serializeBoardState(nextSnapshot.tasks, nextSnapshot.categories);
+
+          if (lastSyncedJsonRef.current !== null && nextJson === lastSyncedJsonRef.current) {
+            const syncedAt = serverUpdatedAtRef.current;
+
+            if (syncedAt) {
+              setSyncStatus('synced');
+              setSyncTooltip(formatSyncedTooltip(syncedAt));
+            }
+            continue;
+          }
+
+          setSyncStatus('syncing');
+          setSyncTooltip('Сохраняем изменения на сервер…');
+
+          try {
+            await saveBoardSnapshotToServer(nextSnapshot);
+          } catch (error) {
+            if (handleUnauthorizedError(error)) {
+              return;
+            }
+
+            if (error instanceof ApiError && error.status === 400) {
+              setSyncStatus('invalid');
+              setSyncTooltip('Сервер отклонил данные. Проверьте длину названия и описания задачи.');
+              return;
+            }
+
+            setSyncStatus('offline');
+            setSyncTooltip('Сервер недоступен, изменения сохранены локально и будут отправлены при следующем действии.');
+            return;
+          }
+        } while (syncRerunRequestedRef.current);
+      } finally {
+        syncInFlightRef.current = false;
+        syncCompletionRef.current = null;
+      }
+    })();
+
+    syncCompletionRef.current = runner;
+    return runner;
+  }
+
   async function pushLatestTasksForBackup(): Promise<void> {
-    const nextTasks = latestTasksRef.current;
-    const nextCategories = latestCategoriesRef.current;
-    const nextJson = serializeBoardState(nextTasks, nextCategories);
+    const nextJson = serializeBoardState(latestTasksRef.current, latestCategoriesRef.current);
 
     if (lastSyncedJsonRef.current !== null && nextJson === lastSyncedJsonRef.current) {
       return;
     }
 
-    setSyncStatus('syncing');
-    setSyncTooltip('Сохраняем изменения перед созданием резервной копии…');
-
-    try {
-      const nextState = await pushTasksToServer(nextTasks, nextCategories, serverVersionRef.current ?? 0);
-
-      lastSyncedJsonRef.current = nextJson;
-      setServerVersion(nextState.version);
-      setServerUpdatedAt(nextState.updatedAt);
-      setConflictState(null);
-      setSyncStatus('synced');
-      setSyncTooltip(formatSyncedTooltip(nextState.updatedAt));
-    } catch (error) {
-      if (handleUnauthorizedError(error)) {
-        return;
-      }
-
-      if (error instanceof ApiError && error.status === 409 && isConflictStatePayload(error.payload)) {
-        setConflictState(error.payload);
-        setSyncStatus('conflict');
-        setSyncTooltip('На сервере есть более новая версия. Загрузите её перед следующей записью.');
-        throw error;
-      }
-
-      if (error instanceof ApiError && error.status === 400) {
-        setSyncStatus('invalid');
-        setSyncTooltip('Сервер отклонил данные. Проверьте длину названия и описания задачи.');
-        throw error;
-      }
-
-      setSyncStatus('offline');
-      setSyncTooltip('Сервер недоступен, изменения сохранены только локально.');
-      throw error;
-    }
+    await syncLatestBoardToServer();
   }
 
   async function runBackup(source: BackupSource): Promise<void> {
@@ -906,7 +1077,6 @@ function App() {
         document.visibilityState === 'hidden' ||
         !hasInitializedSyncRef.current ||
         syncStatusRef.current !== 'synced' ||
-        conflictStateRef.current !== null ||
         lastBackedUpVersionRef.current === serverVersionRef.current ||
         serializeBoardState(latestTasksRef.current, latestCategoriesRef.current) !== lastSyncedJsonRef.current
       ) {
@@ -929,11 +1099,6 @@ function App() {
         }
       }
 
-      if (conflictStateRef.current) {
-        setBackupTooltip('Сначала разрешите конфликт синхронизации, затем создайте резервную копию ещё раз.');
-        return;
-      }
-
       if (
         source === 'manual' &&
         serializeBoardState(latestTasksRef.current, latestCategoriesRef.current) !== lastSyncedJsonRef.current
@@ -949,9 +1114,7 @@ function App() {
         return;
       }
 
-      if (error instanceof ApiError && error.status === 409 && isConflictStatePayload(error.payload)) {
-        setBackupTooltip('Резервная копия не создана: на сервере уже есть более новая версия. Сначала загрузите её.');
-      } else if (source === 'manual') {
+      if (source === 'manual') {
         setBackupTooltip('Не удалось создать резервную копию: сервер сейчас недоступен. Попробуйте ещё раз.');
       }
     } finally {
@@ -975,7 +1138,7 @@ function App() {
   }, []);
 
   useEffect(() => {
-    if (authStatus !== 'authenticated' || !hasInitializedSyncRef.current || conflictState) {
+    if (authStatus !== 'authenticated' || !hasInitializedSyncRef.current) {
       return;
     }
 
@@ -985,58 +1148,8 @@ function App() {
       return;
     }
 
-    let isCancelled = false;
-    setSyncStatus('syncing');
-    setSyncTooltip('Сохраняем изменения и отправляем их на сервер…');
-
-    const timeoutId = window.setTimeout(() => {
-      void (async () => {
-        try {
-          const nextState = await pushTasksToServer(tasks, categories, serverVersionRef.current ?? 0);
-
-          if (isCancelled) {
-            return;
-          }
-
-          lastSyncedJsonRef.current = nextJson;
-          setServerVersion(nextState.version);
-          setServerUpdatedAt(nextState.updatedAt);
-          setConflictState(null);
-          setSyncStatus('synced');
-          setSyncTooltip(formatSyncedTooltip(nextState.updatedAt));
-        } catch (error) {
-          if (isCancelled) {
-            return;
-          }
-
-          if (handleUnauthorizedError(error)) {
-            return;
-          }
-
-          if (error instanceof ApiError && error.status === 409 && isConflictStatePayload(error.payload)) {
-            setConflictState(error.payload);
-            setSyncStatus('conflict');
-            setSyncTooltip('На сервере есть более новая версия. Загрузите её перед следующей записью.');
-            return;
-          }
-
-          if (error instanceof ApiError && error.status === 400) {
-            setSyncStatus('invalid');
-            setSyncTooltip('Сервер отклонил данные. Проверьте длину названия и описания задачи.');
-            return;
-          }
-
-          setSyncStatus('offline');
-          setSyncTooltip('Сервер недоступен, изменения сохранены только локально.');
-        }
-      })();
-    }, 500);
-
-    return () => {
-      isCancelled = true;
-      window.clearTimeout(timeoutId);
-    };
-  }, [authStatus, categories, conflictState, tasks]);
+    void syncLatestBoardToServer();
+  }, [authStatus, categories, tasks]);
 
   useEffect(() => {
     if (!draggedTaskId) {
@@ -1136,14 +1249,6 @@ function App() {
     }
   }
 
-  const visibleTasks = useMemo(() => {
-    const query = searchQuery.trim().toLowerCase();
-    if (!query) return tasks;
-    return tasks.filter(
-      (task) =>
-        task.title.toLowerCase().includes(query) || task.description.toLowerCase().includes(query),
-    );
-  }, [tasks, searchQuery]);
   const activeCategories = useMemo(() => categories.filter((category) => !isArchivedCategory(category)), [categories]);
   const archivedCategories = useMemo(
     () =>
@@ -1157,15 +1262,15 @@ function App() {
     [activeCategories],
   );
   const openTasks = useMemo(
-    () => visibleTasks.filter((task) => task.status === 'open' && activeCategoryKeys.has(task.category)),
-    [activeCategoryKeys, visibleTasks],
+    () => tasks.filter((task) => task.status === 'open' && activeCategoryKeys.has(task.category)),
+    [activeCategoryKeys, tasks],
   );
   const archiveTasks = useMemo(
     () =>
-      visibleTasks
+      tasks
         .filter((task) => task.status === 'closed')
         .sort((left, right) => (right.closedAt ?? '').localeCompare(left.closedAt ?? '')),
-    [visibleTasks],
+    [tasks],
   );
   const tasksByCategory = useMemo(() => {
     const grouped = Object.fromEntries(activeCategories.map((category) => [category.key, [] as Task[]])) as Record<
@@ -1200,25 +1305,6 @@ function App() {
   function navigateToScreen(nextScreen: Screen) {
     window.history.pushState({}, '', getPathForScreen(nextScreen));
     setScreen(nextScreen);
-    setSelectedTaskId(null);
-  }
-
-  function reloadServerState() {
-    if (!conflictState) {
-      return;
-    }
-
-    const serverTasks = sanitizeTasks(conflictState.tasks);
-    const serverCategories = sanitizeCategories(conflictState.categories, serverTasks);
-
-    setTasks(serverTasks);
-    setCategories(serverCategories);
-    setServerVersion(conflictState.version);
-    setServerUpdatedAt(conflictState.updatedAt);
-    lastSyncedJsonRef.current = serializeBoardState(serverTasks, serverCategories);
-    setConflictState(null);
-    setSyncStatus('synced');
-    setSyncTooltip(formatSyncedTooltip(conflictState.updatedAt));
     setSelectedTaskId(null);
   }
 
@@ -1618,7 +1704,9 @@ function App() {
     }
   }
 
-  const isRainVisible = rainOverride ?? isRainyWeather;
+  const effectiveRainIntensity: RainIntensity =
+    rainOverride === true ? 'max' : rainOverride === false ? 'none' : weatherRainIntensity;
+  const isRainVisible = effectiveRainIntensity !== 'none';
 
   function toggleRainOverride(): void {
     setRainOverride(!isRainVisible);
@@ -1645,19 +1733,18 @@ function App() {
         onDecorationMove={moveBackgroundDecoration}
         onDecorationResize={resizeBackgroundDecoration}
       />
-      {isRainVisible && <WeatherRainEffect />}
+      {isRainVisible && <WeatherRainEffect intensity={effectiveRainIntensity} />}
       <aside className="weather-widget" aria-label="Погода">
-        <WeatherBadge onRainChange={setIsRainyWeather} />
+        <WeatherBadge onRainIntensityChange={setWeatherRainIntensity} />
         <button
           type="button"
           role="switch"
           aria-checked={isRainVisible}
-          className={`weather-rain-toggle has-tooltip${isRainVisible ? ' weather-rain-toggle--active' : ''}`}
-          data-tooltip={isRainVisible ? 'Выключить live-дождь' : 'Включить live-дождь'}
-          title={isRainVisible ? 'Выключить live-дождь' : 'Включить live-дождь'}
+          aria-label={isRainVisible ? 'Выключить погоду live' : 'Включить погоду live'}
+          className={`weather-rain-toggle${isRainVisible ? ' weather-rain-toggle--active' : ''}`}
           onClick={toggleRainOverride}
         >
-          <span className="weather-rain-toggle__label">live</span>
+          <span className="weather-rain-toggle__label">погода live</span>
           <span className="weather-rain-toggle__track" aria-hidden="true">
             <span className="weather-rain-toggle__thumb" />
           </span>
@@ -1692,9 +1779,9 @@ function App() {
             {isBackgroundSaveConfirmed ? (
               <Check size={18} strokeWidth={2.3} aria-hidden="true" />
             ) : isBackgroundEditMode ? (
-              <ColumnsGapIcon size={18} />
+              <Save size={18} strokeWidth={2.1} aria-hidden="true" />
             ) : (
-              <Palette size={18} strokeWidth={1.9} aria-hidden="true" />
+              <ColumnsGapIcon size={18} />
             )}
             <span className="sr-only">
               {isBackgroundSaveConfirmed
@@ -1720,24 +1807,6 @@ function App() {
           onLogout={() => void handleLogout()}
           onToggleScreen={() => navigateToScreen(screen === 'active' ? 'archive' : 'active')}
         />
-
-        <SearchBar value={searchQuery} onChange={setSearchQuery} />
-
-        {conflictState && (
-          <section className="sync-alert sync-alert--conflict" role="status">
-            <div className="sync-alert__copy">
-              <strong>Конфликт синхронизации</strong>
-              <span>
-                На сервере уже есть другая версия. Текущее локальное состояние сохранено в браузере и не будет
-                отправляться, пока вы не разрешите конфликт.
-              </span>
-            </div>
-
-            <button type="button" className="button button--secondary" onClick={reloadServerState}>
-              Загрузить серверную версию
-            </button>
-          </section>
-        )}
 
         {screen === 'active' ? (
           <main className="screen">

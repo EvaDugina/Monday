@@ -588,40 +588,32 @@
 .weather-rain-toggle {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  min-height: 34px;
-  padding: 5px 6px 5px 10px;
-  border: 1px solid color-mix(in srgb, rgba(255, 255, 255, 0.48) 76%, var(--text) 10%);
+  gap: 6px;
+  min-height: 26px;
+  padding: 2px 1px 2px 4px;
+  border: 0;
   border-radius: 999px;
-  background:
-    linear-gradient(135deg, rgba(255, 255, 255, 0.48), rgba(255, 255, 255, 0.2)),
-    color-mix(in srgb, var(--surface) 58%, transparent);
+  background: transparent;
   color: var(--muted);
   cursor: pointer;
   font: inherit;
-  font-size: 0.8rem;
+  font-size: 0.76rem;
   line-height: 1;
   white-space: nowrap;
-  box-shadow:
-    0 14px 30px rgba(15, 15, 15, 0.08),
-    inset 0 1px 0 rgba(255, 255, 255, 0.72),
-    inset 0 -1px 0 rgba(255, 255, 255, 0.18);
-  backdrop-filter: blur(22px) saturate(1.55);
-  -webkit-backdrop-filter: blur(22px) saturate(1.55);
+  box-shadow: none;
   transition:
-    border-color 120ms ease,
     background 120ms ease,
     color 120ms ease;
 }
 
 .weather-rain-toggle__label {
-  font-weight: 600;
+  font-weight: 500;
 }
 
 .weather-rain-toggle__track {
   position: relative;
-  width: 34px;
-  height: 20px;
+  width: 28px;
+  height: 16px;
   border-radius: 999px;
   background: color-mix(in srgb, var(--text) 14%, rgba(255, 255, 255, 0.42));
   box-shadow:
@@ -634,10 +626,10 @@
 
 .weather-rain-toggle__thumb {
   position: absolute;
-  top: 3px;
-  left: 3px;
-  width: 14px;
-  height: 14px;
+  top: 2px;
+  left: 2px;
+  width: 12px;
+  height: 12px;
   border-radius: 50%;
   background: #ffffff;
   box-shadow:
@@ -649,7 +641,6 @@
 }
 
 .weather-rain-toggle--active {
-  border-color: color-mix(in srgb, #e03131 42%, rgba(255, 255, 255, 0.5));
   color: #e03131;
 }
 
@@ -661,24 +652,12 @@
 }
 
 .weather-rain-toggle--active .weather-rain-toggle__thumb {
-  transform: translateX(14px);
+  transform: translateX(12px);
 }
 
 .weather-rain-toggle:focus-visible {
   outline: none;
-  box-shadow:
-    0 0 0 4px color-mix(in srgb, #e03131 18%, transparent),
-    0 14px 30px rgba(15, 15, 15, 0.08),
-    inset 0 1px 0 rgba(255, 255, 255, 0.72);
-}
-
-@media (hover: hover) {
-  .weather-rain-toggle:hover {
-    border-color: color-mix(in srgb, var(--text) 18%, rgba(255, 255, 255, 0.72));
-    background:
-      linear-gradient(135deg, rgba(255, 255, 255, 0.64), rgba(255, 255, 255, 0.28)),
-      color-mix(in srgb, var(--surface) 62%, transparent);
-  }
+  box-shadow: 0 0 0 3px color-mix(in srgb, #e03131 18%, transparent);
 }
 
 .has-tooltip {
@@ -797,10 +776,6 @@
 
 .sync-status__dot--offline {
   background: var(--sync-offline);
-}
-
-.sync-status__dot--conflict {
-  background: var(--urgent);
 }
 
 .sync-status__dot--invalid {
@@ -964,41 +939,9 @@ button:disabled {
   gap: 20px;
 }
 
-.sync-alert {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  padding: 14px 16px;
-  border: 1px solid var(--border-strong);
-  border-radius: 10px;
-  background: var(--surface);
-}
-
-.sync-alert--conflict {
-  border-color: color-mix(in srgb, var(--urgent) 26%, transparent);
-  background: color-mix(in srgb, var(--urgent) 7%, var(--surface));
-}
-
-.sync-alert__copy {
-  min-width: 0;
-  display: grid;
-  gap: 4px;
-}
-
-.sync-alert__copy strong {
-  font-size: 0.95rem;
-}
-
-.sync-alert__copy span {
-  color: var(--muted);
-  font-size: 0.88rem;
-  line-height: 1.5;
-}
-
 .sections {
   display: grid;
-  gap: 96px;
+  gap: 48px;
 }
 
 .archive-list {
@@ -1096,7 +1039,7 @@ button:disabled {
   position: relative;
   isolation: isolate;
   display: grid;
-  gap: 16px;
+  gap: 8px;
   overflow: visible;
   padding: 16px;
   border: 1px solid color-mix(in srgb, rgba(255, 255, 255, 0.42) 76%, var(--category-color, var(--text)) 24%);
@@ -1156,7 +1099,7 @@ button:disabled {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding-bottom: 12px;
+  padding-bottom: 8px;
   border-bottom: 1px solid var(--border);
 }
 
@@ -1706,6 +1649,10 @@ button:disabled {
   overflow-wrap: anywhere;
 }
 
+.task-details__title-input {
+  font-size: 1rem;
+}
+
 .text-input {
   width: 100%;
   padding: 8px 10px;
@@ -2037,7 +1984,7 @@ button:disabled {
   }
 
   .sections {
-    gap: 40px;
+    gap: 20px;
   }
 
   .header {
@@ -2051,15 +1998,6 @@ button:disabled {
     justify-content: space-between;
     flex-wrap: wrap;
     gap: 12px;
-  }
-
-  .sync-alert {
-    flex-direction: column;
-    align-items: flex-start;
-  }
-
-  .sync-alert .button {
-    width: 100%;
   }
 
   .category-section {
