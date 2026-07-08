@@ -507,7 +507,7 @@ function App() {
   const [isBackgroundSaveConfirmed, setIsBackgroundSaveConfirmed] = useState(false);
   const [isBackgroundDragActive, setIsBackgroundDragActive] = useState(false);
   const [weatherRainIntensity, setWeatherRainIntensity] = useState<RainIntensity>('none');
-  const [rainOverride, setRainOverride] = useState<boolean | null>(null);
+  const [isWeatherLiveEnabled, setIsWeatherLiveEnabled] = useState(true);
   const latestTasksRef = useRef(tasks);
   const latestCategoriesRef = useRef(categories);
   const backgroundDecorationsRef = useRef(backgroundDecorations);
@@ -1765,12 +1765,11 @@ function App() {
     }
   }, []);
 
-  const effectiveRainIntensity: RainIntensity =
-    rainOverride === true ? 'max' : rainOverride === false ? 'none' : weatherRainIntensity;
+  const effectiveRainIntensity: RainIntensity = isWeatherLiveEnabled ? weatherRainIntensity : 'none';
   const isRainVisible = effectiveRainIntensity !== 'none';
 
-  function toggleRainOverride(): void {
-    setRainOverride(!isRainVisible);
+  function toggleWeatherLive(): void {
+    setIsWeatherLiveEnabled((isEnabled) => !isEnabled);
   }
 
   if (authStatus !== 'authenticated') {
@@ -1800,10 +1799,10 @@ function App() {
         <button
           type="button"
           role="switch"
-          aria-checked={isRainVisible}
-          aria-label={isRainVisible ? 'Выключить погоду live' : 'Включить погоду live'}
-          className={`weather-rain-toggle${isRainVisible ? ' weather-rain-toggle--active' : ''}`}
-          onClick={toggleRainOverride}
+          aria-checked={isWeatherLiveEnabled}
+          aria-label={isWeatherLiveEnabled ? 'Выключить погоду live' : 'Включить погоду live'}
+          className={`weather-rain-toggle${isWeatherLiveEnabled ? ' weather-rain-toggle--active' : ''}`}
+          onClick={toggleWeatherLive}
         >
           <span className="weather-rain-toggle__label">погода live</span>
           <span className="weather-rain-toggle__track" aria-hidden="true">
