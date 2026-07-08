@@ -1,5 +1,5 @@
 import { Archive } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
+import { memo, useEffect, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import type { Category, CategoryOption, Task } from '../types';
 import { MAX_CATEGORY_LABEL_LENGTH } from '../types';
@@ -19,7 +19,7 @@ interface CategorySectionProps {
   closingTaskIds: string[];
   isDropTarget: boolean;
   onDropTargetChange: (category: Category | null) => void;
-  onCreate: (title: string) => void;
+  onCreate: (category: Category, title: string) => void;
   onCategoryArchive: (category: Category) => void;
   onCategoryColorChange: (category: Category, color: string) => void;
   onCategoryRename: (category: Category, label: string) => void;
@@ -257,12 +257,12 @@ function CategorySection({
               isDragging={task.id === draggedTaskId}
               isClosing={closingTaskIds.includes(task.id)}
               categories={categories}
-              onDragStart={() => onTaskDragStart(task.id)}
+              onDragStart={onTaskDragStart}
               onDragEnd={onTaskDragEnd}
-              onOpen={() => onTaskOpen(task.id)}
-              onQuickClose={() => onQuickClose(task.id)}
+              onOpen={onTaskOpen}
+              onQuickClose={onQuickClose}
               onTouchDragOver={onDropTargetChange}
-              onTouchDrop={(nextCategory) => onTaskDrop(task.id, nextCategory)}
+              onTouchDrop={onTaskDrop}
             />
           ))
         ) : isLoading ? (
@@ -274,9 +274,9 @@ function CategorySection({
         ) : null}
       </div>
 
-      <InlineCreator placeholder="Название задачи..." onCreate={onCreate} />
+      <InlineCreator placeholder="Название задачи..." onCreate={(title) => onCreate(category, title)} />
     </section>
   );
 }
 
-export default CategorySection;
+export default memo(CategorySection);

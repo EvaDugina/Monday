@@ -1,5 +1,5 @@
 import { GripVertical, Pin } from 'lucide-react';
-import { useRef, useState } from 'react';
+import { memo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import type { Category, CategoryOption, Task } from '../types';
 import { triggerHaptic } from '../utils/haptic';
@@ -32,12 +32,12 @@ interface TaskItemProps {
   task: Task;
   isDragging?: boolean;
   isClosing?: boolean;
-  onDragStart?: () => void;
+  onDragStart?: (taskId: string) => void;
   onDragEnd?: () => void;
-  onOpen: () => void;
-  onQuickClose?: () => void;
+  onOpen: (taskId: string) => void;
+  onQuickClose?: (taskId: string) => void;
   onTouchDragOver?: (category: Category | null) => void;
-  onTouchDrop?: (category: Category) => void;
+  onTouchDrop?: (taskId: string, category: Category) => void;
 }
 
 function TaskItem({
@@ -82,14 +82,14 @@ function TaskItem({
     event.dataTransfer.setData('application/x-monday-task-id', task.id);
     event.dataTransfer.setData('application/x-monday-task-category', task.category);
     event.dataTransfer.setData('text/plain', task.id);
-    onDragStart?.();
+    onDragStart?.(task.id);
   }
 
   function handleActivationKey(event: React.KeyboardEvent) {
     if (isClosing) return;
     if (event.key === 'Enter' || event.key === ' ') {
       event.preventDefault();
-      onOpen();
+      onOpen(task.id);
     }
   }
 
@@ -152,7 +152,7 @@ function TaskItem({
       justGesturedRef.current = true;
       if (dx <= -SWIPE_THRESHOLD && onQuickClose) {
         triggerHaptic('warning');
-        onQuickClose();
+        onQuickClose(task.id);
       }
     }
     setSwipeOffset(0);
@@ -166,7 +166,7 @@ function TaskItem({
       return;
     }
     if (!isClosing) {
-      onOpen();
+      onOpen(task.id);
     }
   }
 
@@ -201,7 +201,7 @@ function TaskItem({
     state.timer = window.setTimeout(() => {
       if (!state || !longPressStateRef.current || state !== longPressStateRef.current) return;
       state.active = true;
-      onDragStart?.();
+      onDragStart?.(task.id);
       setIsTouchDragging(true);
       triggerHaptic('medium');
     }, LONG_PRESS_MS);
@@ -236,7 +236,7 @@ function TaskItem({
       const next = findCategoryUnder(event.clientX, event.clientY);
       onTouchDragOver?.(null);
       if (next && next !== task.category) {
-        onTouchDrop?.(next);
+        onTouchDrop?.(task.id, next);
       }
       onDragEnd?.();
       setIsTouchDragging(false);
@@ -278,7 +278,7 @@ function TaskItem({
           return;
         }
         if (isClosing) return;
-        onOpen();
+        onOpen(task.id);
       }}
       onKeyDown={handleActivationKey}
       onPointerDown={handleCardPointerDown}
@@ -295,7 +295,7 @@ function TaskItem({
           className="task-card__checkbox"
           onClick={(event) => {
             event.stopPropagation();
-            onQuickClose();
+            onQuickClose(task.id);
           }}
           aria-label="Закрыть задачу"
           title="Закрыть задачу"
@@ -343,7 +343,7 @@ function TaskItem({
             justGesturedRef.current = false;
             return;
           }
-          if (!isClosing) onOpen();
+          if (!isClosing) onOpen(task.id);
         }}
         onKeyDown={(event) => {
           event.stopPropagation();
@@ -363,4 +363,4 @@ function TaskItem({
   );
 }
 
-export default TaskItem;
+export default memo(TaskItem);

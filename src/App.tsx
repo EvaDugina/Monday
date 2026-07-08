@@ -1,4 +1,4 @@
-import { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react';
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Check, Save } from 'lucide-react';
 import {
   ApiError,
@@ -48,6 +48,7 @@ import {
 import { compareIsoDates } from './utils/dates';
 
 const AUTO_BACKUP_INTERVAL_MS = 5 * 60_000;
+const LOCAL_PERSIST_DEBOUNCE_MS = 400;
 const BACKGROUND_SAVE_CONFIRM_MS = 400;
 const BACKGROUND_SAVE_TOAST_DISMISS_MS = 5_000;
 const TASK_CLOSE_DELAY_MS = 10_000;
@@ -522,6 +523,13 @@ function App() {
   const syncCompletionRef = useRef<Promise<void> | null>(null);
   const closingTimeoutsRef = useRef<Record<string, number>>({});
   const backgroundSaveConfirmTimeoutRef = useRef<number | null>(null);
+  const persistTimeoutRef = useRef<number | null>(null);
+  const pendingPersistRef = useRef<{
+    categories: CategoryOption[];
+    tasks: Task[];
+    updatedAt: string | null;
+    version: number | null;
+  } | null>(null);
   const dragPointerYRef = useRef<number | null>(null);
   const dragScrollFrameRef = useRef<number | null>(null);
   const backupRunnerRef = useRef<(source: BackupSource) => void>(() => undefined);
@@ -764,15 +772,59 @@ function App() {
     syncStatusRef.current = syncStatus;
   }, [syncStatus]);
 
-  useEffect(() => {
+  const flushLocalState = useCallback(() => {
+    if (persistTimeoutRef.current !== null) {
+      window.clearTimeout(persistTimeoutRef.current);
+      persistTimeoutRef.current = null;
+    }
+
+    const pending = pendingPersistRef.current;
+
+    if (!pending) {
+      return;
+    }
+
+    pendingPersistRef.current = null;
     saveLocalState({
-      categories,
+      categories: pending.categories,
       lastSyncedJson: lastSyncedJsonRef.current,
-      tasks,
-      version: serverVersion,
-      updatedAt: serverUpdatedAt,
+      tasks: pending.tasks,
+      version: pending.version,
+      updatedAt: pending.updatedAt,
     });
-  }, [categories, serverUpdatedAt, serverVersion, tasks]);
+  }, []);
+
+  useEffect(() => {
+    pendingPersistRef.current = {
+      categories,
+      tasks,
+      updatedAt: serverUpdatedAt,
+      version: serverVersion,
+    };
+
+    if (persistTimeoutRef.current === null) {
+      persistTimeoutRef.current = window.setTimeout(() => {
+        flushLocalState();
+      }, LOCAL_PERSIST_DEBOUNCE_MS);
+    }
+  }, [categories, flushLocalState, serverUpdatedAt, serverVersion, tasks]);
+
+  useEffect(() => {
+    function handleVisibilityChange() {
+      if (document.visibilityState === 'hidden') {
+        flushLocalState();
+      }
+    }
+
+    window.addEventListener('pagehide', flushLocalState);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      window.removeEventListener('pagehide', flushLocalState);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      flushLocalState();
+    };
+  }, [flushLocalState]);
 
   useEffect(() => {
     function handlePopState() {
@@ -1137,19 +1189,19 @@ function App() {
     return () => window.clearInterval(intervalId);
   }, []);
 
+  const boardJson = useMemo(() => serializeBoardState(tasks, categories), [categories, tasks]);
+
   useEffect(() => {
     if (authStatus !== 'authenticated' || !hasInitializedSyncRef.current) {
       return;
     }
 
-    const nextJson = serializeBoardState(tasks, categories);
-
-    if (lastSyncedJsonRef.current !== null && nextJson === lastSyncedJsonRef.current) {
+    if (lastSyncedJsonRef.current !== null && boardJson === lastSyncedJsonRef.current) {
       return;
     }
 
     void syncLatestBoardToServer();
-  }, [authStatus, categories, tasks]);
+  }, [authStatus, boardJson]);
 
   useEffect(() => {
     if (!draggedTaskId) {
@@ -1329,6 +1381,15 @@ function App() {
     setTasks((current) => [nextTask, ...current]);
   }
 
+  const createTaskInCategory = useCallback((category: Category, title: string) => {
+    createTask({
+      title,
+      description: '',
+      category,
+      deadline: { kind: 'none' },
+    });
+  }, []);
+
   function createCategory(label: string) {
     const trimmed = label.trim().slice(0, MAX_CATEGORY_LABEL_LENGTH);
 
@@ -1368,7 +1429,7 @@ function App() {
     triggerHaptic('light');
   }
 
-  function renameCategory(categoryKey: Category, nextLabel: string) {
+  const renameCategory = useCallback((categoryKey: Category, nextLabel: string) => {
     const trimmed = nextLabel.trim().slice(0, MAX_CATEGORY_LABEL_LENGTH);
 
     if (!trimmed) {
@@ -1394,18 +1455,18 @@ function App() {
 
     latestCategoriesRef.current = nextCategories;
     setCategories(nextCategories);
-  }
+  }, []);
 
-  function changeCategoryColor(categoryKey: Category, color: string) {
+  const changeCategoryColor = useCallback((categoryKey: Category, color: string) => {
     const nextCategories = latestCategoriesRef.current.map((category) =>
       category.key === categoryKey ? { ...category, color } : category,
     );
 
     latestCategoriesRef.current = nextCategories;
     setCategories(nextCategories);
-  }
+  }, []);
 
-  function archiveCategory(categoryKey: Category) {
+  const archiveCategory = useCallback((categoryKey: Category) => {
     const currentCategories = latestCategoriesRef.current;
     const category = currentCategories.find((candidate) => candidate.key === categoryKey);
 
@@ -1466,7 +1527,7 @@ function App() {
       id: Date.now(),
       message: 'Категория перемещена в архив',
     });
-  }
+  }, []);
 
   function restoreCategory(categoryKey: Category) {
     const category = latestCategoriesRef.current.find((candidate) => candidate.key === categoryKey);
@@ -1587,7 +1648,7 @@ function App() {
     triggerHaptic('light');
   }
 
-  function archiveTask(taskId: string) {
+  const archiveTask = useCallback((taskId: string) => {
     const task = latestTasksRef.current.find((candidate) => candidate.id === taskId);
 
     if (!task || task.status !== 'open') {
@@ -1615,7 +1676,7 @@ function App() {
       onAction: () => undoArchive(taskId),
       duration: TASK_CLOSE_DELAY_MS,
     });
-  }
+  }, []);
 
   function restoreTask(taskId: string) {
     setTasks((current) =>
@@ -1659,20 +1720,20 @@ function App() {
     }
   }
 
-  function startTaskDrag(taskId: string) {
+  const startTaskDrag = useCallback((taskId: string) => {
     setDraggedTaskId(taskId);
-  }
+  }, []);
 
-  function updateDropTarget(category: Category | null) {
+  const updateDropTarget = useCallback((category: Category | null) => {
     setDropTargetCategory((current) => (current === category ? current : category));
-  }
+  }, []);
 
-  function endTaskDrag() {
+  const endTaskDrag = useCallback(() => {
     setDraggedTaskId(null);
     setDropTargetCategory(null);
-  }
+  }, []);
 
-  function moveTaskToCategory(taskId: string, nextCategory: Category) {
+  const moveTaskToCategory = useCallback((taskId: string, nextCategory: Category) => {
     const targetCategory = latestCategoriesRef.current.find((category) => category.key === nextCategory);
 
     if (!targetCategory || isArchivedCategory(targetCategory)) {
@@ -1702,7 +1763,7 @@ function App() {
     if (didChange) {
       triggerHaptic('medium');
     }
-  }
+  }, []);
 
   const effectiveRainIntensity: RainIntensity =
     rainOverride === true ? 'max' : rainOverride === false ? 'none' : weatherRainIntensity;
@@ -1827,19 +1888,12 @@ function App() {
                     draggedTaskCategory={draggedTask?.category ?? null}
                     isDropTarget={dropTargetCategory === category.key}
                     closingTaskIds={closingTaskIds}
-                    onCreate={(title) =>
-                      createTask({
-                        title,
-                        description: '',
-                        category: category.key,
-                        deadline: { kind: 'none' },
-                      })
-                    }
+                    onCreate={createTaskInCategory}
                     onCategoryArchive={archiveCategory}
                     onCategoryColorChange={changeCategoryColor}
                     onCategoryRename={renameCategory}
                     onDropTargetChange={updateDropTarget}
-                    onQuickClose={(taskId) => archiveTask(taskId)}
+                    onQuickClose={archiveTask}
                     onTaskDragEnd={endTaskDrag}
                     onTaskDragStart={startTaskDrag}
                     onTaskDrop={moveTaskToCategory}
