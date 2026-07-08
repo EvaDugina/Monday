@@ -1554,7 +1554,6 @@ button:disabled {
 
 .inline-creator .text-input:focus {
   outline: none;
-  background: var(--hover);
 }
 
 /* Empty state */
