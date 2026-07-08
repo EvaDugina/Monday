@@ -6,7 +6,7 @@
 - Владелец: команда проекта
 - Последнее обновление: 2026-07-07
 - Стадия проекта: `POC B`
-- Версия проекта: `v0.1.29`
+- Версия проекта: `v0.1.30`
 - Предыдущая версия: `не применимо`
 - Следующий целевой этап: `MVP A`
 - Архив финальной версии предыдущего этапа: `не применимо, каноническая пара документов вводится впервые`
@@ -175,7 +175,7 @@
   - итоговая иконка загружается как локальный SVG из `public/weather-icons/{iconCode}.svg` через `withAppBasePath`
   - флаги городов загружаются как локальные SVG из `public/flags/{countryCode}.svg` через `withAppBasePath`; emoji-флаги не используются
   - `WeatherBadge` выводит `RainIntensity = none | light | moderate | heavy | max` из `precipitation` и WMO `weather_code`: drizzle/slight rain дают лёгкий профиль, moderate rain — средний, heavy precipitation — heavy, heavy rain/thunderstorm — max
-  - App хранит `weatherRainIntensity` от прогноза и `rainOverride: boolean | null`: `null` означает автоматическую интенсивность, `true` вручную включает `max`, `false` выключает rain-layer
+  - App хранит `weatherRainIntensity` от прогноза и `isWeatherLiveEnabled: boolean`, который по умолчанию `true`; выключенное состояние скрывает rain-layer, включённое берёт интенсивность из прогноза
   - rain-layer рендерится компонентом `WeatherRainEffect` как fixed canvas overlay: сначала загружается локальный `/vendor/raindrop-fx/index.js`, при ошибке запускается внутренняя canvas-анимация падающих капель
   - `WeatherRainEffect` принимает intensity и мапит её на профили плотности, размера капель, mist opacity и fallback canvas opacity; прежние параметры сохранены как профиль `max`
   - старый CSS/image-паттерн дождя не используется, чтобы дождливое состояние выглядело как живая анимация
@@ -678,3 +678,4 @@
 - `2026-07-07 | v0.1.27 | тип: UX | важность: важно в документации | weather rain switch получил короткий borderless-вид и label "погода live"; TaskDetailsModal снова сохраняет title`
 - `2026-07-07 | v0.1.28 | тип: UX | важность: важно в документации | WeatherBadge вычисляет RainIntensity из прогноза, WeatherRainEffect применяет light/moderate/heavy/max профили, ручной режим включает max`
 - `2026-07-07 | v0.1.29 | тип: sync | важность: важно в документации | frontend применяет серверный snapshot при старте, отправляет изменения сразу и автоматически обрабатывает 409 через merge/retry без conflict UI`
+- `2026-07-07 | v0.1.30 | тип: UX | важность: важно в документации | weather live-switch стартует включённым и управляет только видимостью forecast-driven rain-layer`
