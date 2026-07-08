@@ -409,7 +409,7 @@
 }
 
 .weather-widget {
-  position: fixed;
+  position: absolute;
   top: max(16px, env(safe-area-inset-top, 0px));
   left: max(16px, env(safe-area-inset-left, 0px));
   z-index: 22;

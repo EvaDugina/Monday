@@ -2,6 +2,7 @@ import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } fro
 import { Check, Save } from 'lucide-react';
 import {
   ApiError,
+  backgroundImageUrl,
   createBackupSnapshot,
   fetchCurrentUser,
   isConflictStatePayload,
@@ -9,6 +10,7 @@ import {
   logoutFromServer,
   pullTasksFromServer,
   pushTasksToServer,
+  uploadBackgroundImage,
 } from './api';
 import { stripAppBasePath, withAppBasePath } from './basePath';
 import ArchiveList from './components/ArchiveList';
@@ -23,9 +25,18 @@ import WeatherRainEffect from './components/WeatherRainEffect';
 
 const CreateTaskModal = lazy(() => import('./components/CreateTaskModal'));
 const TaskDetailsModal = lazy(() => import('./components/TaskDetailsModal'));
-import { loadLocalState, sanitizeCategories, sanitizeTasks, saveLocalState, serializeBoardState } from './storage';
+import {
+  loadLocalState,
+  sanitizeCategories,
+  sanitizeSettings,
+  sanitizeTasks,
+  saveLocalState,
+  serializeBoardState,
+} from './storage';
 import { triggerHaptic } from './utils/haptic';
 import type {
+  AccountSettings,
+  BackgroundDecorationRef,
   BackupSnapshotResponse,
   BackupSource,
   Category,
@@ -59,9 +70,11 @@ const DEFAULT_BACKUP_TOOLTIP =
 const LOGIN_REQUIRED_TOOLTIP = 'Войдите, чтобы открыть MONDAY и синхронизировать задачи.';
 const SESSION_EXPIRED_MESSAGE = 'Сессия завершилась. Войдите снова.';
 const BACKGROUND_DECORATIONS_STORAGE_KEY = 'monday:background-decorations';
+const LEGACY_WEATHER_CITY_STORAGE_KEY = 'monday:weather-city';
+const SETTINGS_MIGRATED_STORAGE_KEY = 'monday:settings-migrated';
+const DEFAULT_WEATHER_CITY_ID = 'moscow';
 const MAX_BACKGROUND_DECORATIONS = 6;
 const MAX_BACKGROUND_FILE_BYTES = 5 * 1024 * 1024;
-const MAX_BACKGROUND_DATA_URL_LENGTH = 1_600_000;
 const ACCEPTED_BACKGROUND_IMAGE_TYPES = new Set(['image/gif', 'image/jpeg', 'image/png', 'image/webp']);
 
 interface PreparedBackgroundImage {
@@ -124,21 +137,6 @@ function loadBackgroundDecorations(): BackgroundDecoration[] {
     return normalizedDecorations;
   } catch {
     return [];
-  }
-}
-
-function saveBackgroundDecorations(decorations: BackgroundDecoration[]): boolean {
-  try {
-    if (decorations.length === 0) {
-      window.localStorage.removeItem(BACKGROUND_DECORATIONS_STORAGE_KEY);
-    } else {
-      window.localStorage.setItem(BACKGROUND_DECORATIONS_STORAGE_KEY, JSON.stringify(decorations));
-    }
-
-    return true;
-  } catch (error) {
-    console.error('[MONDAY] Failed to persist background decorations:', error);
-    return false;
   }
 }
 
@@ -246,6 +244,91 @@ function createBackgroundDecoration(file: File, image: PreparedBackgroundImage, 
   };
 }
 
+function dataUrlToBlob(dataUrl: string): Blob {
+  const [header, base64 = ''] = dataUrl.split(',');
+  const mimeMatch = /data:([^;]+)/.exec(header);
+  const mime = mimeMatch ? mimeMatch[1] : 'application/octet-stream';
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+
+  return new Blob([bytes], { type: mime });
+}
+
+function decorationToRef(decoration: BackgroundDecoration): BackgroundDecorationRef | null {
+  if (!decoration.imageId) {
+    return null;
+  }
+
+  const ref: BackgroundDecorationRef = {
+    id: decoration.id,
+    imageId: decoration.imageId,
+    name: decoration.name,
+    left: decoration.left,
+    top: decoration.top,
+    width: decoration.width,
+    opacity: decoration.opacity,
+    rotation: decoration.rotation,
+    depth: decoration.depth,
+  };
+
+  if (decoration.height !== undefined) {
+    ref.height = decoration.height;
+  }
+
+  return ref;
+}
+
+function refsFromDecorations(decorations: BackgroundDecoration[]): BackgroundDecorationRef[] {
+  return decorations.map(decorationToRef).filter((ref): ref is BackgroundDecorationRef => ref !== null);
+}
+
+function refToDecoration(ref: BackgroundDecorationRef): BackgroundDecoration {
+  return {
+    anchor: 'center',
+    id: ref.id,
+    imageId: ref.imageId,
+    name: ref.name,
+    src: backgroundImageUrl(ref.imageId),
+    left: ref.left,
+    top: ref.top,
+    width: ref.width,
+    height: ref.height,
+    opacity: ref.opacity,
+    rotation: ref.rotation,
+    depth: ref.depth,
+  };
+}
+
+function resolveDecorations(refs: BackgroundDecorationRef[]): BackgroundDecoration[] {
+  return refs.map(refToDecoration);
+}
+
+function resolveInitialDecorations(settings: AccountSettings): BackgroundDecoration[] {
+  if (settings.backgroundDecorations.length > 0) {
+    return resolveDecorations(settings.backgroundDecorations);
+  }
+
+  return loadBackgroundDecorations();
+}
+
+function settingsAreEmpty(settings: AccountSettings): boolean {
+  return settings.backgroundDecorations.length === 0 && settings.weatherCityId === undefined;
+}
+
+function loadLegacyWeatherCityId(): string | undefined {
+  try {
+    const value = window.localStorage.getItem(LEGACY_WEATHER_CITY_STORAGE_KEY);
+    const trimmed = value?.trim();
+    return trimmed ? trimmed : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function isFileDrag(event: React.DragEvent<HTMLElement>): boolean {
   return Array.from(event.dataTransfer.types).includes('Files');
 }
@@ -314,6 +397,7 @@ function formatBackupTooltip(result: BackupSnapshotResponse): string {
 interface BoardSnapshot {
   categories: CategoryOption[];
   tasks: Task[];
+  settings: AccountSettings;
 }
 
 function areSerializedEqual(left: unknown, right: unknown): boolean {
@@ -335,10 +419,13 @@ function parseBoardSnapshotJson(value: string | null): BoardSnapshot | null {
     const tasks = sanitizeTasks(Array.isArray(rawTasks) ? (rawTasks as Task[]) : []);
     const rawCategories =
       typeof parsed === 'object' && parsed !== null ? (parsed as { categories?: unknown }).categories : CATEGORIES;
+    const rawSettings =
+      typeof parsed === 'object' && parsed !== null ? (parsed as { settings?: unknown }).settings : undefined;
 
     return {
       categories: sanitizeCategories(rawCategories, tasks),
       tasks,
+      settings: sanitizeSettings(rawSettings),
     };
   } catch {
     return null;
@@ -351,6 +438,7 @@ function getServerBoardSnapshot(serverState: ServerTasksState): BoardSnapshot {
   return {
     categories: sanitizeCategories(serverState.categories, tasks),
     tasks,
+    settings: sanitizeSettings(serverState.settings),
   };
 }
 
@@ -437,6 +525,8 @@ function mergeBoardSnapshots(base: BoardSnapshot, local: BoardSnapshot, server: 
   return {
     categories: mergeCategories(base.categories, local.categories, server.categories, tasks),
     tasks,
+    // Settings ride the same versioned snapshot but are not field-merged (TD-001): local wins.
+    settings: local.settings,
   };
 }
 
@@ -501,8 +591,12 @@ function App() {
   const [toast, setToast] = useState<ToastState | null>(null);
   const [isInitialLoading, setIsInitialLoading] = useState(true);
   const [backgroundDecorations, setBackgroundDecorations] = useState<BackgroundDecoration[]>(() =>
-    loadBackgroundDecorations(),
+    resolveInitialDecorations(initialState.settings),
   );
+  const [syncedBackgroundRefs, setSyncedBackgroundRefs] = useState<BackgroundDecorationRef[]>(
+    () => initialState.settings.backgroundDecorations,
+  );
+  const [weatherCityId, setWeatherCityId] = useState<string | undefined>(() => initialState.settings.weatherCityId);
   const [isBackgroundEditMode, setIsBackgroundEditMode] = useState(false);
   const [isBackgroundSaveConfirmed, setIsBackgroundSaveConfirmed] = useState(false);
   const [isBackgroundDragActive, setIsBackgroundDragActive] = useState(false);
@@ -510,7 +604,9 @@ function App() {
   const [isWeatherLiveEnabled, setIsWeatherLiveEnabled] = useState(true);
   const latestTasksRef = useRef(tasks);
   const latestCategoriesRef = useRef(categories);
+  const latestSettingsRef = useRef<AccountSettings>(initialState.settings);
   const backgroundDecorationsRef = useRef(backgroundDecorations);
+  const migrationDoneRef = useRef(false);
   const serverVersionRef = useRef(serverVersion);
   const serverUpdatedAtRef = useRef(serverUpdatedAt);
   const syncStatusRef = useRef<SyncStatus>(syncStatus);
@@ -527,6 +623,7 @@ function App() {
   const pendingPersistRef = useRef<{
     categories: CategoryOption[];
     tasks: Task[];
+    settings: AccountSettings;
     updatedAt: string | null;
     version: number | null;
   } | null>(null);
@@ -560,14 +657,13 @@ function App() {
     }
 
     const prepared = await Promise.allSettled(
-      selectedFiles.map(async (file, index) => {
+      selectedFiles.map(async (file, index): Promise<BackgroundDecoration> => {
         const image = await prepareBackgroundImage(file);
+        const blob = dataUrlToBlob(image.src);
+        const { id: imageId } = await uploadBackgroundImage(blob);
+        const decoration = createBackgroundDecoration(file, image, currentDecorations.length + index);
 
-        if (image.src.length > MAX_BACKGROUND_DATA_URL_LENGTH) {
-          throw new Error('Prepared image is too large for localStorage');
-        }
-
-        return createBackgroundDecoration(file, image, currentDecorations.length + index);
+        return { ...decoration, imageId, src: backgroundImageUrl(imageId) };
       }),
     );
     const nextDecorations = prepared
@@ -577,7 +673,7 @@ function App() {
     if (nextDecorations.length === 0) {
       setToast({
         id: Date.now(),
-        message: 'Не удалось подготовить изображение для фона',
+        message: 'Не удалось загрузить изображение для фона. Проверьте соединение и попробуйте ещё раз.',
       });
       return;
     }
@@ -610,22 +706,13 @@ function App() {
     setIsBackgroundEditMode(true);
   }
 
-  function saveBackgroundDecorationState(errorMessage = 'Не удалось сохранить изменения фона'): boolean {
-    if (!saveBackgroundDecorations(backgroundDecorationsRef.current)) {
-      setToast({
-        id: Date.now(),
-        message: errorMessage,
-      });
-      return false;
-    }
-
-    return true;
+  function commitBackgroundDecorations(): void {
+    // Commit the draft into synced settings; the boardJson effect pushes it to the account.
+    setSyncedBackgroundRefs(refsFromDecorations(backgroundDecorationsRef.current));
   }
 
   function saveAndExitBackgroundEditMode(): void {
-    if (!saveBackgroundDecorationState()) {
-      return;
-    }
+    commitBackgroundDecorations();
 
     if (backgroundSaveConfirmTimeoutRef.current !== null) {
       window.clearTimeout(backgroundSaveConfirmTimeoutRef.current);
@@ -678,6 +765,85 @@ function App() {
       id: Date.now(),
       message: 'Изображение удалено из черновика фона',
     });
+  }
+
+  function applyAccountSettings(nextSettings: AccountSettings): void {
+    setSyncedBackgroundRefs(nextSettings.backgroundDecorations);
+    setWeatherCityId(nextSettings.weatherCityId);
+
+    if (nextSettings.backgroundDecorations.length > 0) {
+      const resolved = resolveDecorations(nextSettings.backgroundDecorations);
+      backgroundDecorationsRef.current = resolved;
+      setBackgroundDecorations(resolved);
+      return;
+    }
+
+    if (migrationDoneRef.current) {
+      // Server is genuinely empty (or migration completed with no images) — clear the render.
+      backgroundDecorationsRef.current = [];
+      setBackgroundDecorations([]);
+    }
+    // else: migration is incomplete (uploads failed) — keep the current legacy render so the
+    // background does not vanish; it retries on the next online bootstrap.
+  }
+
+  function markLegacySettingsMigrated(): void {
+    try {
+      window.localStorage.setItem(SETTINGS_MIGRATED_STORAGE_KEY, '1');
+      window.localStorage.removeItem(BACKGROUND_DECORATIONS_STORAGE_KEY);
+      window.localStorage.removeItem(LEGACY_WEATHER_CITY_STORAGE_KEY);
+    } catch {
+      // Migration flag is best-effort; ignore quota/private-mode failures.
+    }
+  }
+
+  // One-time move of legacy localStorage background/city into the account. Uploads each legacy base64
+  // image to blob storage and returns settings the caller seeds to the server via the normal sync path.
+  async function migrateLegacySettings(): Promise<AccountSettings> {
+    if (migrationDoneRef.current || window.localStorage.getItem(SETTINGS_MIGRATED_STORAGE_KEY)) {
+      migrationDoneRef.current = true;
+      return { backgroundDecorations: [] };
+    }
+
+    migrationDoneRef.current = true;
+
+    const legacyDecorations = loadBackgroundDecorations();
+    const legacyCityId = loadLegacyWeatherCityId();
+
+    if (legacyDecorations.length === 0 && legacyCityId === undefined) {
+      markLegacySettingsMigrated();
+      return { backgroundDecorations: [] };
+    }
+
+    const uploads = await Promise.allSettled(
+      legacyDecorations.map(async (decoration) => {
+        const blob = dataUrlToBlob(decoration.src);
+        const { id: imageId } = await uploadBackgroundImage(blob);
+        return decorationToRef({ ...decoration, imageId });
+      }),
+    );
+
+    const backgroundDecorations = uploads
+      .filter(
+        (result): result is PromiseFulfilledResult<BackgroundDecorationRef | null> => result.status === 'fulfilled',
+      )
+      .map((result) => result.value)
+      .filter((ref): ref is BackgroundDecorationRef => ref !== null);
+
+    const migrated: AccountSettings = { backgroundDecorations };
+
+    if (legacyCityId !== undefined) {
+      migrated.weatherCityId = legacyCityId;
+    }
+
+    if (backgroundDecorations.length === legacyDecorations.length) {
+      markLegacySettingsMigrated();
+    } else {
+      // Some images failed to upload — keep legacy keys and retry on a later online bootstrap.
+      migrationDoneRef.current = false;
+    }
+
+    return migrated;
   }
 
   function handleBackgroundDragEnter(event: React.DragEvent<HTMLDivElement>): void {
@@ -760,6 +926,15 @@ function App() {
     latestCategoriesRef.current = categories;
   }, [categories]);
 
+  const settings = useMemo<AccountSettings>(
+    () => ({ backgroundDecorations: syncedBackgroundRefs, weatherCityId }),
+    [syncedBackgroundRefs, weatherCityId],
+  );
+
+  useEffect(() => {
+    latestSettingsRef.current = settings;
+  }, [settings]);
+
   useEffect(() => {
     serverVersionRef.current = serverVersion;
   }, [serverVersion]);
@@ -789,6 +964,7 @@ function App() {
       categories: pending.categories,
       lastSyncedJson: lastSyncedJsonRef.current,
       tasks: pending.tasks,
+      settings: pending.settings,
       version: pending.version,
       updatedAt: pending.updatedAt,
     });
@@ -798,6 +974,7 @@ function App() {
     pendingPersistRef.current = {
       categories,
       tasks,
+      settings,
       updatedAt: serverUpdatedAt,
       version: serverVersion,
     };
@@ -807,7 +984,7 @@ function App() {
         flushLocalState();
       }, LOCAL_PERSIST_DEBOUNCE_MS);
     }
-  }, [categories, flushLocalState, serverUpdatedAt, serverVersion, tasks]);
+  }, [categories, flushLocalState, serverUpdatedAt, serverVersion, settings, tasks]);
 
   useEffect(() => {
     function handleVisibilityChange() {
@@ -911,13 +1088,28 @@ function App() {
           return;
         }
 
-        const { categories: serverCategories, tasks: serverTasks } = getServerBoardSnapshot(serverState);
-        const serverJson = serializeBoardState(serverTasks, serverCategories);
+        const serverSnapshot = getServerBoardSnapshot(serverState);
+        const serverTasks = serverSnapshot.tasks;
+        const serverCategories = serverSnapshot.categories;
+        const serverSettings = serverSnapshot.settings;
+        // lastSynced must mirror what the server holds, so a migration (below) still diffs → triggers a PUT.
+        const serverJson = serializeBoardState(serverTasks, serverCategories, serverSettings);
+
+        let effectiveSettings = serverSettings;
+
+        if (settingsAreEmpty(serverSettings)) {
+          effectiveSettings = await migrateLegacySettings();
+
+          if (isCancelled) {
+            return;
+          }
+        }
 
         latestTasksRef.current = serverTasks;
         latestCategoriesRef.current = serverCategories;
         setTasks(serverTasks);
         setCategories(serverCategories);
+        applyAccountSettings(effectiveSettings);
         lastSyncedJsonRef.current = serverJson;
         serverVersionRef.current = serverState.version;
         serverUpdatedAtRef.current = serverState.updatedAt;
@@ -972,19 +1164,25 @@ function App() {
       parseBoardSnapshotJson(lastSyncedJsonRef.current) ?? {
         categories: CATEGORIES,
         tasks: [],
+        settings: { backgroundDecorations: [] },
       };
-    const initialLocalJson = serializeBoardState(localSnapshot.tasks, localSnapshot.categories);
+    const initialLocalJson = serializeBoardState(localSnapshot.tasks, localSnapshot.categories, localSnapshot.settings);
 
     for (let attempt = 0; attempt < 4; attempt += 1) {
-      const nextJson = serializeBoardState(nextSnapshot.tasks, nextSnapshot.categories);
+      const nextJson = serializeBoardState(nextSnapshot.tasks, nextSnapshot.categories, nextSnapshot.settings);
 
       try {
         const nextState = await pushTasksToServer(
           nextSnapshot.tasks,
           nextSnapshot.categories,
+          nextSnapshot.settings,
           serverVersionRef.current ?? 0,
         );
-        const currentJson = serializeBoardState(latestTasksRef.current, latestCategoriesRef.current);
+        const currentJson = serializeBoardState(
+          latestTasksRef.current,
+          latestCategoriesRef.current,
+          latestSettingsRef.current,
+        );
 
         lastSyncedJsonRef.current = nextJson;
         serverVersionRef.current = nextState.version;
@@ -1002,9 +1200,14 @@ function App() {
             const currentSnapshot: BoardSnapshot = {
               categories: latestCategoriesRef.current,
               tasks: latestTasksRef.current,
+              settings: latestSettingsRef.current,
             };
             const nextLocalSnapshot = mergeBoardSnapshots(localSnapshot, currentSnapshot, nextSnapshot);
-            const nextLocalJson = serializeBoardState(nextLocalSnapshot.tasks, nextLocalSnapshot.categories);
+            const nextLocalJson = serializeBoardState(
+              nextLocalSnapshot.tasks,
+              nextLocalSnapshot.categories,
+              nextLocalSnapshot.settings,
+            );
 
             if (nextLocalJson !== currentJson) {
               latestTasksRef.current = nextLocalSnapshot.tasks;
@@ -1057,8 +1260,9 @@ function App() {
           const nextSnapshot: BoardSnapshot = {
             categories: latestCategoriesRef.current,
             tasks: latestTasksRef.current,
+            settings: latestSettingsRef.current,
           };
-          const nextJson = serializeBoardState(nextSnapshot.tasks, nextSnapshot.categories);
+          const nextJson = serializeBoardState(nextSnapshot.tasks, nextSnapshot.categories, nextSnapshot.settings);
 
           if (lastSyncedJsonRef.current !== null && nextJson === lastSyncedJsonRef.current) {
             const syncedAt = serverUpdatedAtRef.current;
@@ -1102,7 +1306,7 @@ function App() {
   }
 
   async function pushLatestTasksForBackup(): Promise<void> {
-    const nextJson = serializeBoardState(latestTasksRef.current, latestCategoriesRef.current);
+    const nextJson = serializeBoardState(latestTasksRef.current, latestCategoriesRef.current, latestSettingsRef.current);
 
     if (lastSyncedJsonRef.current !== null && nextJson === lastSyncedJsonRef.current) {
       return;
@@ -1130,7 +1334,8 @@ function App() {
         !hasInitializedSyncRef.current ||
         syncStatusRef.current !== 'synced' ||
         lastBackedUpVersionRef.current === serverVersionRef.current ||
-        serializeBoardState(latestTasksRef.current, latestCategoriesRef.current) !== lastSyncedJsonRef.current
+        serializeBoardState(latestTasksRef.current, latestCategoriesRef.current, latestSettingsRef.current) !==
+          lastSyncedJsonRef.current
       ) {
         return;
       }
@@ -1153,7 +1358,8 @@ function App() {
 
       if (
         source === 'manual' &&
-        serializeBoardState(latestTasksRef.current, latestCategoriesRef.current) !== lastSyncedJsonRef.current
+        serializeBoardState(latestTasksRef.current, latestCategoriesRef.current, latestSettingsRef.current) !==
+          lastSyncedJsonRef.current
       ) {
         await pushLatestTasksForBackup();
       }
@@ -1189,7 +1395,7 @@ function App() {
     return () => window.clearInterval(intervalId);
   }, []);
 
-  const boardJson = useMemo(() => serializeBoardState(tasks, categories), [categories, tasks]);
+  const boardJson = useMemo(() => serializeBoardState(tasks, categories, settings), [categories, settings, tasks]);
 
   useEffect(() => {
     if (authStatus !== 'authenticated' || !hasInitializedSyncRef.current) {
@@ -1795,7 +2001,11 @@ function App() {
       />
       {isRainVisible && <WeatherRainEffect intensity={effectiveRainIntensity} />}
       <aside className="weather-widget" aria-label="Погода">
-        <WeatherBadge onRainIntensityChange={setWeatherRainIntensity} />
+        <WeatherBadge
+          cityId={weatherCityId ?? DEFAULT_WEATHER_CITY_ID}
+          onCityChange={setWeatherCityId}
+          onRainIntensityChange={setWeatherRainIntensity}
+        />
         <button
           type="button"
           role="switch"

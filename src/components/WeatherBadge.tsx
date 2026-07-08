@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from 'react';
 import { buildApiPath, withAppBasePath } from '../basePath';
 import type { RainIntensity } from '../types';
 
-const WEATHER_CITY_STORAGE_KEY = 'monday:weather-city';
 const DEFAULT_CITY_ID = 'moscow';
 const WEATHER_ICON_BASE_PATH = '/weather-icons';
 const WEATHER_FLAG_BASE_PATH = '/flags';
@@ -33,6 +32,8 @@ interface ForecastResponse {
 }
 
 interface WeatherBadgeProps {
+  cityId: string;
+  onCityChange: (cityId: string) => void;
   onRainIntensityChange?: (rainIntensity: RainIntensity) => void;
 }
 
@@ -52,22 +53,6 @@ function findCityOption(value: string | null): WeatherCityOption {
     ) ?? WEATHER_CITY_OPTIONS.find((option) => option.id === DEFAULT_CITY_ID);
 
   return city ?? WEATHER_CITY_OPTIONS[0];
-}
-
-function loadWeatherCityId(): string {
-  try {
-    return findCityOption(window.localStorage.getItem(WEATHER_CITY_STORAGE_KEY)).id;
-  } catch {
-    return DEFAULT_CITY_ID;
-  }
-}
-
-function saveWeatherCityId(cityId: string): void {
-  try {
-    window.localStorage.setItem(WEATHER_CITY_STORAGE_KEY, cityId);
-  } catch {
-    // Weather city is a convenience preference; ignore localStorage quota/private-mode failures.
-  }
 }
 
 function formatTemperature(value: number): string {
@@ -252,8 +237,7 @@ async function fetchWeather(
   };
 }
 
-function WeatherBadge({ onRainIntensityChange }: WeatherBadgeProps) {
-  const [cityId, setCityId] = useState(loadWeatherCityId);
+function WeatherBadge({ cityId, onCityChange, onRainIntensityChange }: WeatherBadgeProps) {
   const selectedCity = findCityOption(cityId);
   const [temperature, setTemperature] = useState<string | null>(null);
   const [weatherCode, setWeatherCode] = useState<number | null>(null);
@@ -338,8 +322,7 @@ function WeatherBadge({ onRainIntensityChange }: WeatherBadgeProps) {
   }, [isCityMenuOpen]);
 
   function handleCityChange(nextCityId: string) {
-    setCityId(nextCityId);
-    saveWeatherCityId(nextCityId);
+    onCityChange(nextCityId);
     setIsCityMenuOpen(false);
   }
 

@@ -1,4 +1,4 @@
-import type { CategoryOption, Task } from './types';
+import type { AccountSettings, BackgroundDecorationRef, CategoryOption, Task } from './types';
 import {
   CATEGORIES,
   CATEGORY_COLOR_PALETTE,
@@ -11,6 +11,8 @@ const TASKS_STORAGE_KEY = 'monday:tasks';
 const CATEGORIES_STORAGE_KEY = 'monday:categories';
 const SYNC_STATE_STORAGE_KEY = 'monday:sync-state';
 const LAST_SYNCED_TASKS_STORAGE_KEY = 'monday:last-synced-tasks';
+const SETTINGS_STORAGE_KEY = 'monday:settings';
+const MAX_BACKGROUND_DECORATIONS = 6;
 const ARCHIVE_RETENTION_DAYS = 90;
 const HEX_COLOR_PATTERN = /^#[0-9a-f]{6}$/i;
 
@@ -18,6 +20,7 @@ export interface LocalStateSnapshot {
   categories: CategoryOption[];
   lastSyncedJson: string | null;
   tasks: Task[];
+  settings: AccountSettings;
   version: number | null;
   updatedAt: string | null;
 }
@@ -26,8 +29,103 @@ export function serializeTasks(tasks: Task[]): string {
   return JSON.stringify(tasks);
 }
 
-export function serializeBoardState(tasks: Task[], categories: CategoryOption[]): string {
-  return JSON.stringify({ tasks, categories });
+// Canonical key order + JSON.stringify dropping `undefined` keeps the serialized string stable,
+// so change-detection (boardJson vs lastSyncedJson) never trips on incidental key ordering.
+function canonicalBackgroundRef(ref: BackgroundDecorationRef): BackgroundDecorationRef {
+  return {
+    id: ref.id,
+    imageId: ref.imageId,
+    name: ref.name,
+    left: ref.left,
+    top: ref.top,
+    width: ref.width,
+    height: ref.height,
+    opacity: ref.opacity,
+    rotation: ref.rotation,
+    depth: ref.depth,
+  };
+}
+
+export function serializeBoardState(tasks: Task[], categories: CategoryOption[], settings: AccountSettings): string {
+  return JSON.stringify({
+    tasks,
+    categories,
+    settings: {
+      backgroundDecorations: settings.backgroundDecorations.map(canonicalBackgroundRef),
+      weatherCityId: settings.weatherCityId,
+    },
+  });
+}
+
+function sanitizeBackgroundRef(value: unknown): BackgroundDecorationRef | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  const { id, imageId, name, left, top, width, height, opacity, rotation, depth } = value;
+
+  if (
+    typeof id !== 'string' ||
+    typeof imageId !== 'string' ||
+    !id.trim() ||
+    !imageId.trim() ||
+    typeof left !== 'number' ||
+    typeof top !== 'number' ||
+    typeof width !== 'number' ||
+    typeof opacity !== 'number' ||
+    typeof rotation !== 'number' ||
+    typeof depth !== 'number' ||
+    ![left, top, width, opacity, rotation, depth].every((candidate) => Number.isFinite(candidate))
+  ) {
+    return null;
+  }
+
+  const ref: BackgroundDecorationRef = {
+    id: id.trim(),
+    imageId: imageId.trim(),
+    name: typeof name === 'string' ? name : '',
+    left,
+    top,
+    width,
+    opacity,
+    rotation,
+    depth,
+  };
+
+  if (typeof height === 'number' && Number.isFinite(height)) {
+    ref.height = height;
+  }
+
+  return ref;
+}
+
+export function sanitizeSettings(value: unknown): AccountSettings {
+  if (!isRecord(value)) {
+    return { backgroundDecorations: [] };
+  }
+
+  const rawDecorations = Array.isArray(value.backgroundDecorations) ? value.backgroundDecorations : [];
+  const backgroundDecorations: BackgroundDecorationRef[] = [];
+
+  for (const candidate of rawDecorations) {
+    if (backgroundDecorations.length >= MAX_BACKGROUND_DECORATIONS) {
+      break;
+    }
+
+    const ref = sanitizeBackgroundRef(candidate);
+
+    if (ref) {
+      backgroundDecorations.push(ref);
+    }
+  }
+
+  const settings: AccountSettings = { backgroundDecorations };
+
+  if (typeof value.weatherCityId === 'string' && value.weatherCityId.trim()) {
+    settings.weatherCityId = value.weatherCityId.trim();
+  }
+
+  return settings;
 }
 
 export function pruneArchive(tasks: Task[], now = new Date()): Task[] {
@@ -155,9 +253,30 @@ function loadLastSyncedJson(): string | null {
     const sanitizedTasks = sanitizeTasks(rawTasks as Task[]);
     const rawCategories = isRecord(parsed) && Array.isArray(parsed.categories) ? parsed.categories : CATEGORIES;
     const sanitizedCategories = sanitizeCategories(rawCategories, sanitizedTasks);
-    return serializeBoardState(sanitizedTasks, sanitizedCategories);
+    const sanitizedSettings = sanitizeSettings(isRecord(parsed) ? parsed.settings : undefined);
+    return serializeBoardState(sanitizedTasks, sanitizedCategories, sanitizedSettings);
   } catch {
     return null;
+  }
+}
+
+function loadSettingsMirror(): AccountSettings {
+  const raw = window.localStorage.getItem(SETTINGS_STORAGE_KEY);
+
+  if (!raw) {
+    return { backgroundDecorations: [] };
+  }
+
+  try {
+    return sanitizeSettings(JSON.parse(raw));
+  } catch {
+    const quarantineKey = `${SETTINGS_STORAGE_KEY}:corrupt:${Date.now()}`;
+    try {
+      window.localStorage.setItem(quarantineKey, raw);
+    } catch {
+      // quarantine failed too (quota) — original data stays in main slot, untouched
+    }
+    return { backgroundDecorations: [] };
   }
 }
 
@@ -179,12 +298,14 @@ export function loadLocalState(): LocalStateSnapshot {
   const raw = window.localStorage.getItem(TASKS_STORAGE_KEY);
   const syncMetadata = loadSyncMetadata();
   const lastSyncedJson = loadLastSyncedJson();
+  const settings = loadSettingsMirror();
 
   if (!raw) {
     return {
       categories: loadCategories([]),
       lastSyncedJson,
       tasks: [],
+      settings,
       version: syncMetadata.version,
       updatedAt: syncMetadata.updatedAt,
     };
@@ -206,6 +327,7 @@ export function loadLocalState(): LocalStateSnapshot {
       categories: loadCategories([]),
       lastSyncedJson,
       tasks: [],
+      settings,
       version: syncMetadata.version,
       updatedAt: syncMetadata.updatedAt,
     };
@@ -220,6 +342,7 @@ export function loadLocalState(): LocalStateSnapshot {
       categories,
       lastSyncedJson,
       tasks: sanitized,
+      settings,
       version: syncMetadata.version,
       updatedAt: syncMetadata.updatedAt,
     });
@@ -229,6 +352,7 @@ export function loadLocalState(): LocalStateSnapshot {
     categories,
     lastSyncedJson,
     tasks: sanitized,
+    settings,
     version: syncMetadata.version,
     updatedAt: syncMetadata.updatedAt,
   };
@@ -250,6 +374,15 @@ export function saveLocalState(snapshot: LocalStateSnapshot): void {
       window.localStorage.removeItem(LAST_SYNCED_TASKS_STORAGE_KEY);
     } else {
       window.localStorage.setItem(LAST_SYNCED_TASKS_STORAGE_KEY, snapshot.lastSyncedJson);
+    }
+
+    const hasSettings =
+      snapshot.settings.backgroundDecorations.length > 0 || snapshot.settings.weatherCityId !== undefined;
+
+    if (hasSettings) {
+      window.localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(snapshot.settings));
+    } else {
+      window.localStorage.removeItem(SETTINGS_STORAGE_KEY);
     }
   } catch (error) {
     console.error('[MONDAY] Failed to persist state to localStorage:', error);

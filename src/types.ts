@@ -23,9 +23,28 @@ export type Screen = 'active' | 'archive';
 
 export type RainIntensity = 'none' | 'light' | 'moderate' | 'heavy' | 'max';
 
+export interface BackgroundDecorationRef {
+  id: string;
+  imageId: string;
+  name: string;
+  left: number;
+  top: number;
+  width: number;
+  height?: number;
+  opacity: number;
+  rotation: number;
+  depth: number;
+}
+
+export interface AccountSettings {
+  backgroundDecorations: BackgroundDecorationRef[];
+  weatherCityId?: string;
+}
+
 export interface ServerTasksState {
   categories: CategoryOption[];
   tasks: Task[];
+  settings: AccountSettings;
   updatedAt: string;
   version: number;
 }

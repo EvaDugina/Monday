@@ -4,9 +4,9 @@
 
 - Статус: approved
 - Владелец: команда проекта
-- Последнее обновление: 2026-07-07
+- Последнее обновление: 2026-07-08
 - Стадия проекта: `POC B`
-- Версия проекта: `v0.1.30`
+- Версия проекта: `v0.1.31`
 - Предыдущая версия: `не применимо`
 - Следующий целевой этап: `MVP A`
 - Архив финальной версии предыдущего этапа: `не применимо, каноническая пара документов вводится впервые`
@@ -59,7 +59,7 @@
 
 ### 2.1. Назначение системы
 
-Система предоставляет веб-доску задач с локальным состоянием, серверным снимком состояния, optimistic concurrency, архивом, резервными снимками и локальными декоративными настройками фона, а также отдельный hosted-контур с reverse proxy и внешней аутентификацией.
+Система предоставляет веб-доску задач с локальным состоянием, серверным снимком состояния, optimistic concurrency, архивом, резервными снимками и синхронизируемыми через аккаунт настройками (фон + выбранный город погоды; байты фоновых изображений — в отдельном серверном blob-хранилище), а также отдельный hosted-контур с reverse proxy и внешней аутентификацией.
 
 ### 2.2. Границы системы
 
@@ -72,10 +72,12 @@
 - `Task`: единица пользовательской работы на доске.
 - `CategoryOption`: пользовательская секция доски с устойчивым ключом, названием и цветом.
 - `Deadline`: дедлайн задачи (`none`, `date`, `range`, `recurring`; weekly recurring использует `mode=week` и `weekday`).
-- `BackgroundDecoration`: локальная браузерная настройка фонового изображения с позицией на page-sized background layer и горизонтальным anchor от центра; не входит в серверный snapshot.
-- `WeatherPreference`: локальная браузерная настройка выбранного id города для floating-погодного виджета.
+- `BackgroundDecoration`: фоновое изображение с позицией на page-sized background layer и горизонтальным anchor от центра; в синхронизируемом snapshot представлено ссылкой `BackgroundDecorationRef` (геометрия + `imageId`), сами байты изображения хранятся отдельно в blob-хранилище сервера.
+- `BackgroundDecorationRef`: ссылка на фоновое изображение внутри `AccountSettings` — `imageId` + геометрия (`left`, `top`, `width`, `height?`, `opacity`, `rotation`, `depth`); base64 в ссылке запрещён.
+- `AccountSettings`: пользовательские настройки аккаунта внутри board snapshot — `backgroundDecorations: BackgroundDecorationRef[]` и опциональный `weatherCityId`.
 - `WeatherRainLayer`: client-only canvas overlay дождя, включаемый погодным виджетом.
-- `ServerTasksState`: серверный снимок доски с `tasks`, `categories`, `updatedAt` и `version`.
+- `ServerTasksState`: серверный снимок доски с `tasks`, `categories`, `settings`, `updatedAt` и `version`.
+- `background_images`: серверная blob-таблица байтов фоновых изображений с привязкой к user key.
 - `task_backups`: таблица резервных снимков с привязкой к пользователю-инициатору.
 - auth headers от reverse proxy: источник текущего identity context для API.
 
@@ -149,8 +151,12 @@
   - retention ограничивает число последних backup-снимков на пользователя
 - Background decorations:
   - UI принимает image-файлы через page-level drag&drop без header-кнопки загрузки
-  - клиент сжимает изображения для локального хранения, кроме GIF
-  - настройки пишутся в `localStorage` отдельно от task snapshot только после явной кнопки сохранения фона
+  - клиент сжимает изображения (кроме GIF), затем сразу загружает байты на сервер (`POST /api/backgrounds`) и получает `imageId`; декорация рендерится через `GET /api/backgrounds/{id}`
+  - геометрия фоновых декораций хранится как `BackgroundDecorationRef[]` внутри `settings` синхронизируемого board snapshot; base64 в snapshot не попадает
+  - изменения background edit-mode остаются черновиком до save-and-exit; на сохранении черновик коммитится в `settings.backgroundDecorations`, что триггерит обычный `PUT /api/tasks`
+  - фон одинаков во всех браузерах одного пользователя; изменения из другого браузера появляются после reload (bootstrap-pull), а не live
+  - при первом запуске новой версии одноразовая миграция переносит legacy `monday:background-decorations`/`monday:weather-city` из `localStorage` в аккаунт: base64 загружается в blob-хранилище, refs сидятся в server snapshot, legacy-ключи очищаются
+  - оффлайн: геометрия/город берутся из localStorage-зеркала snapshot, изображения — из HTTP-кэша браузера (immutable long max-age); добавление нового фона требует онлайна
   - слой фона рендерится за доской как page-sized слой и прокручивается вместе со страницей без parallax-offset от pointer
   - отдельная floating-панель вне `app__inner` включает background edit-mode
   - в background edit-mode кнопка редактирования заменяется кнопкой сохранения изменений и выхода
@@ -161,8 +167,8 @@
   - горизонтальная координата хранится как pixel offset от центра фонового слоя; старые процентные `left` без `anchor` мигрируются при чтении из `localStorage`
   - секции категорий используют CSS liquid glass-подложку (`backdrop-filter`, прозрачный фон, блики и граница) с минимальной белой заливкой для читаемости поверх фоновых изображений
 - Weather:
-  - floating weather badge рендерится вне `app__inner` в левом верхнем углу
-  - выбранный город хранится в `localStorage` по ключу `monday:weather-city` как id из локального списка
+  - weather badge рендерится вне `app__inner` в левом верхнем углу как `position: absolute` и прокручивается вместе со страницей (не закреплён у верха вьюпорта)
+  - выбранный город хранится в `settings.weatherCityId` синхронизируемого board snapshot и одинаков во всех браузерах пользователя; `WeatherBadge` получает `cityId`/`onCityChange` пропсами от `App`
   - пользователь выбирает город через стилизованный listbox, ручной ввод названия не используется
   - локальный список городов включает `tbilisi`
   - каждая city option содержит `countryCode`, который мапится на локальный SVG-флаг `public/flags/{countryCode}.svg`
@@ -183,7 +189,7 @@
 - Hosted auth:
   - reverse proxy передает identity headers
   - API извлекает auth context из заголовков
-  - при `AUTH_REQUIRED=true` защищаются `/api/me`, `/api/tasks`, `/api/backups`
+  - при `AUTH_REQUIRED=true` защищаются `/api/me`, `/api/tasks`, `/api/backups`, `/api/backgrounds`
 
 ### 3.4. Технические границы и горячие точки
 
@@ -238,6 +244,8 @@
   - `GET /api/tasks`
   - `PUT /api/tasks`
   - `POST /api/backups`
+  - `POST /api/backgrounds` (binary image upload, отдельный `express.raw` парсер до 6 MB, возвращает `{ id }`)
+  - `GET /api/backgrounds/:id` (отдаёт байты изображения с `Content-Type` и `Cache-Control: immutable`)
 - env/config:
   - `DEBUG`, `AUTH_REQUIRED`, `PORT`, `SQLITE_PATH`
   - `APP_PORT`, `API_PORT`
@@ -265,22 +273,26 @@
   - `urgent` badge и pin icon рендерятся слева от title; deadline/recurring badges рендерятся справа в той же строке
   - title cluster открывает edit-modal, title редактируется в модалке; отдельная category-chip кнопка в строке отсутствует
   - не добавляют новые поля в snapshot и не требуют миграции SQLite
-- frontend `BackgroundDecoration`:
-  - `anchor`, `id`, `name`, `src`, `left`, `top`, `width`, `opacity`, `rotation`, `depth`
-  - хранится в `localStorage` по ключу `monday:background-decorations`
+- frontend `BackgroundDecoration` (render/draft):
+  - `anchor`, `id`, `imageId?`, `name`, `src`, `left`, `top`, `width`, `opacity`, `rotation`, `depth`
+  - `src` — это `GET /api/backgrounds/{imageId}` URL; `imageId` связывает декорацию с серверным blob
   - `anchor='center'` означает, что `left` является пиксельным смещением центра изображения от середины фонового слоя
   - `top` остается процентной координатой изображения внутри page-sized background layer
   - `width` и опциональный `height` меняются через corner resize handles выбранного фонового изображения в background edit-mode без нарушения пропорций
-  - ограничивается шестью изображениями и не сериализуется в `tasks_json`
-- frontend `WeatherPreference`:
-  - id выбранного города из локального списка хранится в `localStorage` по ключу `monday:weather-city`
-  - значение не сериализуется в `tasks_json` и не попадает в backup
+  - ограничивается шестью изображениями
+- frontend `BackgroundDecorationRef` (synced):
+  - `id`, `imageId`, `name`, `left`, `top`, `width`, `height?`, `opacity`, `rotation`, `depth` (без `src`/base64)
+  - сериализуется внутри `settings.backgroundDecorations` board snapshot с канонической сортировкой ключей для стабильного change-detection
+- frontend `AccountSettings`:
+  - `backgroundDecorations: BackgroundDecorationRef[]`, опциональный `weatherCityId`
+  - едет внутри `state.tasks_json` и синхронизируется тем же `PUT/GET /api/tasks`; локальное зеркало — ключ `monday:settings`
 - `LocalStateSnapshot`:
-  - локальные `tasks`, `categories`, `version`, `updatedAt`
+  - локальные `tasks`, `categories`, `settings`, `version`, `updatedAt`
 - SQLite tables:
   - `state(id=1, tasks_json, updated_at, version)`
   - `task_backups(user_key, user_email, user_name, tasks_json, state_version, state_updated_at, source, created_at)`
-  - `state.tasks_json` обратно совместимо читает старый формат `Task[]`, но новые записи сохраняются как `{ "tasks": Task[], "categories": CategoryOption[] }`
+  - `background_images(id, user_key, mime, bytes BLOB, created_at)` — байты фоновых изображений; orphan GC удаляет непривязанные блобы старше grace-окна на успешной записи snapshot
+  - `state.tasks_json` обратно совместимо читает старый формат `Task[]`, но новые записи сохраняются как `{ "tasks": Task[], "categories": CategoryOption[], "settings": AccountSettings }`
 
 ### 5.3. Выходные данные
 
@@ -306,9 +318,11 @@
 - `closedAt` обязателен только для `closed` задачи
 - `PUT /api/tasks` использует optimistic concurrency и не делает merge при несовпадении версии
 - backup снимок не дублируется, если последняя сохраненная версия для пользователя уже совпадает с текущей
-- фоновые декорации не являются частью API-контракта и не должны попадать в `PUT /api/tasks`
-- погодный виджет не является частью snapshot API MONDAY; браузер ходит только в same-origin `/api/weather/current`, внешний forecast-запрос выполняет API-сервер, а SVG-иконки и SVG-флаги отдаются как локальные static assets приложения
-- hosted CSP держит `connect-src 'self'`; погодные SVG и SVG-флаги остаются в `img-src 'self'`
+- `PUT /api/tasks` принимает опциональный `settings` (`backgroundDecorations` ≤ 6 refs с числовыми границами и `imageId` без data-URL; `weatherCityId` из `[a-z0-9-]`); при 409 клиент разрешает конфликт settings как last-writer-wins (локальные побеждают), задачи/категории — трёхсторонним merge
+- `POST /api/backgrounds` принимает только whitelisted image `Content-Type` (`gif|jpeg|png|webp`) до 5 MB; это raw-бинарь, а не form-post, поэтому не нарушает JSON-only write-модель CSRF
+- фоновые изображения теперь входят в аккаунт: геометрия — в `settings` snapshot, байты — в `background_images`; base64 в `PUT /api/tasks` запрещён
+- погодный виджет не является частью snapshot API MONDAY; браузер ходит только в same-origin `/api/weather/current`, внешний forecast-запрос выполняет API-сервер, а SVG-иконки и SVG-флаги отдаются как локальные static assets приложения; выбранный город синхронизируется через `settings.weatherCityId`
+- hosted CSP держит `connect-src 'self'`; погодные SVG, SVG-флаги и фоновые изображения (`/api/backgrounds/:id`) остаются в `img-src 'self'`
 
 ## 6. Окружения и конфигурация
 
@@ -345,13 +359,14 @@
 
 - для полного локального и production-сценария требуется Docker Compose
 - API зависит от файлового SQLite-хранилища
-- client-side логика рассчитана на современный браузер с `localStorage`, `fetch` и `crypto.randomUUID`
-- фоновые изображения ограничены quota локального хранилища браузера; при переполнении UI должен показать ошибку и оставить доску рабочей
+- client-side логика рассчитана на современный браузер с `localStorage`, `fetch`, `crypto.randomUUID` и Blob/`atob`
+- фоновые изображения хранятся серверными blob'ами; загрузка нового фона требует доступного API, существующий фон рендерится из HTTP-кэша оффлайн; при ошибке загрузки UI показывает тост и оставляет доску рабочей
 - in-memory rate limiting не переживает рестарт сервиса и не распределяется между несколькими инстансами
 
 ### 7.2. Нефункциональные требования в реализации
 
-- сервер валидирует payload задач по схеме и длинам полей; `MAX_TASKS=500`, `MAX_DESCRIPTION_LENGTH=2000`, `MAX_TITLE_LENGTH=200`, body limit `2 MB`
+- сервер валидирует payload задач по схеме и длинам полей; `MAX_TASKS=500`, `MAX_DESCRIPTION_LENGTH=2000`, `MAX_TITLE_LENGTH=200`, глобальный JSON body limit `2 MB`
+- upload фоновых изображений использует отдельный route-scoped `express.raw` парсер (limit `6 MB`, только image `Content-Type`), не меняя глобальный JSON-лимит; серверный `MAX_BACKGROUND_IMAGE_BYTES=5 MB`, превышение отдаёт чистый `413`
 - API отключает `x-powered-by`, ограничивает request body и использует request timeout; `graceful shutdown timeout > requestTimeout`
 - health endpoints `live`, `ready`, `health` служат основой для compose healthchecks и rate-limited
 - production API должен быть закрыт за proxy/auth контуром
@@ -610,15 +625,15 @@
 
 ### TD-005. Local-only background decorations
 
-- Статус: approved
+- Статус: superseded by `TD-008`
 - Контекст:
   - фоновая декорация нужна как персональная настройка интерфейса, а не как часть данных доски.
 - Решение:
-  - изображения хранятся в браузерном `localStorage` по отдельному ключу и рендерятся отдельным статическим компонентом за доской; перемещение, удаление и пропорциональное масштабирование доступны только в background edit-mode и сохраняются в storage только после save-and-exit, а читаемость доски обеспечивается glass-подложками категорий.
+  - изображения хранились в браузерном `localStorage` по отдельному ключу и рендерились отдельным статическим компонентом за доской; перемещение, удаление и пропорциональное масштабирование доступны только в background edit-mode и сохранялись в storage только после save-and-exit, а читаемость доски обеспечивается glass-подложками категорий.
 - Последствия:
-  - API, SQLite schema, backup retention и optimistic concurrency остаются без изменений; фон не синхронизируется между устройствами, а pointermove/delete/resize не пишут в storage до явного сохранения режима редактирования.
+  - фон не синхронизировался между устройствами; это ограничение снято в `TD-008` (фон переведён в аккаунт), draft-until-save UX и glass-подложки сохранены.
 - Связанные планы и требования:
-  - `REQ-009`, `PD-005`
+  - `REQ-009`, `PD-005`, `TD-008`
 
 ### TD-006. Board snapshot включает категории
 
@@ -638,11 +653,23 @@
 - Контекст:
   - пользователю нужна температура дня в отдельном floating badge, но проект не должен добавлять серверные секреты или усложнять API ради вспомогательного UI-виджета.
 - Решение:
-  - использовать Open-Meteo Forecast через same-origin endpoint MONDAY: координаты брать из локального списка городов, forecast `current=temperature_2m,weather_code,is_day,precipitation` использовать для температуры, локальной Yandex light-иконки и canvas rain-overlay; выбранный город хранить в `localStorage`, а флаги городов показывать через локальные SVG assets.
+  - использовать Open-Meteo Forecast через same-origin endpoint MONDAY: координаты брать из локального списка городов, forecast `current=temperature_2m,weather_code,is_day,precipitation` использовать для температуры, локальной Yandex light-иконки и canvas rain-overlay; выбранный город синхронизировать через `settings.weatherCityId` (см. `TD-008`), а флаги городов показывать через локальные SVG assets.
 - Последствия:
-  - SQLite snapshot и backup не меняются; доступность погодных данных зависит от внешнего Open-Meteo и сетевого доступа API-сервера, а weather icons, флаги и `raindrop-fx` остаются локальными static assets.
+  - доступность погодных данных зависит от внешнего Open-Meteo и сетевого доступа API-сервера, а weather icons, флаги и `raindrop-fx` остаются локальными static assets; выбор города теперь одинаков во всех браузерах пользователя.
 - Связанные планы и требования:
-  - `REQ-010`
+  - `REQ-010`, `TD-008`
+
+### TD-008. Account-synced settings + blob storage для фона
+
+- Статус: approved
+- Контекст:
+  - фон и выбранный город хранились только в `localStorage`, поэтому в разных браузерах одного пользователя была разная информация; base64-изображения слишком тяжелы, чтобы класть их в JSON-snapshot.
+- Решение:
+  - геометрия фона и `weatherCityId` вынесены в `AccountSettings` внутри `state.tasks_json` и синхронизируются тем же versioned snapshot и конфликт-механизмом, что и задачи (`TD-001`); settings не мержатся пофайлово — last-writer-wins (локальные побеждают). Байты изображений хранятся в отдельной таблице `background_images` и загружаются/отдаются через `POST /api/backgrounds` и `GET /api/backgrounds/:id` (route-scoped raw parser, глобальный JSON-лимит не тронут). Orphan GC чистит непривязанные блобы на успешной записи snapshot с grace-окном. Одноразовая миграция переносит legacy localStorage-фон/город в аккаунт.
+- Последствия:
+  - фон и город одинаковы во всех браузерах пользователя (обновляются на reload, не live); backup-снимки автоматически включают refs (не байты); восстановление очень старого backup может ссылаться на GC'нутый `imageId` — такие декорации скрываются на 404. Модель остаётся single-shared-snapshot и рассчитана на одного пользователя.
+- Связанные планы и требования:
+  - `REQ-009`, `REQ-010`, `TD-001`, `TD-002`, `TD-005`
 
 ## 14. История изменений документа
 
@@ -679,3 +706,4 @@
 - `2026-07-07 | v0.1.28 | тип: UX | важность: важно в документации | WeatherBadge вычисляет RainIntensity из прогноза, WeatherRainEffect применяет light/moderate/heavy/max профили, ручной режим включает max`
 - `2026-07-07 | v0.1.29 | тип: sync | важность: важно в документации | frontend применяет серверный snapshot при старте, отправляет изменения сразу и автоматически обрабатывает 409 через merge/retry без conflict UI`
 - `2026-07-07 | v0.1.30 | тип: UX | важность: важно в документации | weather live-switch стартует включённым и управляет только видимостью forecast-driven rain-layer`
+- `2026-07-08 | v0.1.31 | тип: UX+data+sync | важность: важно в документации | фон и выбранный город вынесены в account-synced settings внутри board snapshot, байты фоновых изображений — в blob-таблицу background_images с upload/serve эндпоинтами и orphan GC, добавлена одноразовая миграция из localStorage; weather badge больше не закреплён при скролле (TD-008)`

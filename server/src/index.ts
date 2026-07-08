@@ -1,7 +1,17 @@
 import express from 'express';
 import type { Request, Response } from 'express';
+import { randomUUID } from 'node:crypto';
 import { extname, join, resolve } from 'node:path';
-import { closeDatabase, createBackupSnapshot, getTasksState, isDatabaseReady, setTasksState } from './db.js';
+import {
+  closeDatabase,
+  countBackgroundImagesForUser,
+  createBackupSnapshot,
+  getBackgroundImage,
+  getTasksState,
+  insertBackgroundImage,
+  isDatabaseReady,
+  setTasksState,
+} from './db.js';
 import {
   attachAuthContext,
   clearLocalSession,
@@ -13,7 +23,14 @@ import {
   verifyLocalCredentials,
 } from './auth.js';
 import { attachRequestId, createRateLimiter, requestLogger, securityHeaders } from './http.js';
-import { ValidationError, parseLoginPayload, parseTasksPayload } from './schema.js';
+import {
+  ACCEPTED_IMAGE_MIME,
+  MAX_BACKGROUND_IMAGE_BYTES,
+  ValidationError,
+  parseLoginPayload,
+  parseTasksPayload,
+  parseUploadContentType,
+} from './schema.js';
 import { fetchOpenMeteoCurrent } from './weather.js';
 
 const app = express();
@@ -81,6 +98,21 @@ const weatherLimiter = createRateLimiter({
   windowMs: 60_000,
   limit: 60,
 });
+
+const backgroundUploadLimiter = createRateLimiter({
+  name: 'bg-upload',
+  windowMs: 60_000,
+  limit: 20,
+});
+
+// Route-scoped binary parser: keeps the global express.json({ limit: '2mb' }) untouched.
+// Only requests with an accepted image Content-Type reach it, so /api/tasks JSON is unaffected.
+const backgroundUploadParser = express.raw({
+  type: Array.from(ACCEPTED_IMAGE_MIME),
+  limit: '6mb',
+});
+
+const MAX_BACKGROUND_IMAGES_PER_USER = 24;
 
 function getBackupOwner(request: Request) {
   return {
@@ -182,6 +214,7 @@ if (authConfig.mode !== 'none') {
   router.use('/api/me', requireAuth());
   router.use('/api/tasks', requireAuth());
   router.use('/api/backups', requireAuth());
+  router.use('/api/backgrounds', requireAuth());
 }
 
 router.get('/api/me', readLimiter, (request, response) => {
@@ -203,7 +236,8 @@ router.get('/api/weather/current', weatherLimiter, (request, response, next) => 
 
 router.put('/api/tasks', writeLimiter, (request, response) => {
   const payload = parseTasksPayload(request.body);
-  const result = setTasksState(payload.tasks, payload.categories, payload.expectedVersion);
+  const owner = getBackupOwner(request);
+  const result = setTasksState(payload.tasks, payload.categories, payload.settings, payload.expectedVersion, owner.key);
 
   if (result.kind === 'conflict') {
     response.status(409).json(result.state);
@@ -214,6 +248,45 @@ router.put('/api/tasks', writeLimiter, (request, response) => {
     updatedAt: result.state.updatedAt,
     version: result.state.version,
   });
+});
+
+router.post('/api/backgrounds', backgroundUploadLimiter, backgroundUploadParser, (request, response) => {
+  const mime = parseUploadContentType(request.headers['content-type']);
+  const bytes = request.body;
+
+  if (!Buffer.isBuffer(bytes) || bytes.length === 0) {
+    throw new ValidationError('Image body is required');
+  }
+
+  if (bytes.length > MAX_BACKGROUND_IMAGE_BYTES) {
+    throw new ValidationError('Image is too large');
+  }
+
+  const owner = getBackupOwner(request);
+
+  if (countBackgroundImagesForUser(owner.key) >= MAX_BACKGROUND_IMAGES_PER_USER) {
+    throw new ValidationError('Too many background images stored');
+  }
+
+  const id = randomUUID();
+  insertBackgroundImage({ id, userKey: owner.key, mime, bytes });
+  response.status(201).json({ id });
+});
+
+router.get('/api/backgrounds/:id', readLimiter, (request, response) => {
+  const rawId = request.params.id;
+  const id = Array.isArray(rawId) ? rawId[0] : rawId;
+  const image = getBackgroundImage(id);
+
+  if (!image) {
+    response.status(404).json({ error: 'Image not found' });
+    return;
+  }
+
+  response.setHeader('Content-Type', image.mime);
+  response.setHeader('Cache-Control', 'private, max-age=31536000, immutable');
+  response.setHeader('Content-Length', image.bytes.length);
+  response.send(image.bytes);
 });
 
 router.post('/api/backups', backupLimiter, (request, response) => {
@@ -247,6 +320,15 @@ if (mountPath) {
 
 app.use((error: unknown, request: Request, response: Response, _next: express.NextFunction) => {
   if (response.headersSent) {
+    return;
+  }
+
+  if (
+    error !== null &&
+    typeof error === 'object' &&
+    (error as { type?: unknown }).type === 'entity.too.large'
+  ) {
+    response.status(413).json({ error: 'Request body is too large' });
     return;
   }
 

@@ -18,6 +18,15 @@ const MAX_TITLE_LENGTH = 200;
 const MAX_DESCRIPTION_LENGTH = 2000;
 const HEX_COLOR_PATTERN = /^#[0-9a-f]{6}$/i;
 
+const MAX_BACKGROUND_DECORATIONS = 6;
+const MAX_DECORATION_NAME_LENGTH = 200;
+const MAX_IMAGE_ID_LENGTH = 128;
+const MAX_WEATHER_CITY_ID_LENGTH = 64;
+const WEATHER_CITY_ID_PATTERN = /^[a-z0-9-]+$/;
+
+export const ACCEPTED_IMAGE_MIME = new Set(['image/gif', 'image/jpeg', 'image/png', 'image/webp']);
+export const MAX_BACKGROUND_IMAGE_BYTES = 5 * 1024 * 1024;
+
 export interface ApiDeadlineNone {
   kind: 'none';
 }
@@ -62,9 +71,28 @@ export interface ApiCategoryOption {
   archivedAt?: string;
 }
 
+export interface ApiBackgroundDecorationRef {
+  id: string;
+  imageId: string;
+  name: string;
+  left: number;
+  top: number;
+  width: number;
+  height?: number;
+  opacity: number;
+  rotation: number;
+  depth: number;
+}
+
+export interface ApiAccountSettings {
+  backgroundDecorations: ApiBackgroundDecorationRef[];
+  weatherCityId?: string;
+}
+
 export interface PutTasksPayload {
   categories: ApiCategoryOption[];
   tasks: ApiTask[];
+  settings: ApiAccountSettings;
   expectedVersion: number;
 }
 
@@ -140,6 +168,14 @@ function expectInteger(value: unknown, field: string, minimum = 0): number {
   }
 
   return value as number;
+}
+
+function expectFiniteNumber(value: unknown, field: string, minimum: number, maximum: number): number {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < minimum || value > maximum) {
+    throw new ValidationError(`${field} must be a number between ${minimum} and ${maximum}`);
+  }
+
+  return value;
 }
 
 function parseDeadline(value: unknown, field: string): ApiDeadline {
@@ -276,6 +312,69 @@ function parseCategories(value: unknown): ApiCategoryOption[] {
   });
 }
 
+function parseBackgroundRef(value: unknown, index: number): ApiBackgroundDecorationRef {
+  const field = `settings.backgroundDecorations[${index}]`;
+  const record = expectRecord(value, `${field} must be an object`);
+  const imageId = expectTrimmedString(record.imageId, `${field}.imageId`, MAX_IMAGE_ID_LENGTH);
+
+  if (imageId.startsWith('data:')) {
+    throw new ValidationError(`${field}.imageId must be an image id, not a data URL`);
+  }
+
+  const ref: ApiBackgroundDecorationRef = {
+    id: expectTrimmedString(record.id, `${field}.id`, MAX_ID_LENGTH),
+    imageId,
+    name: expectString(record.name ?? '', `${field}.name`, MAX_DECORATION_NAME_LENGTH),
+    left: expectFiniteNumber(record.left, `${field}.left`, -20000, 20000),
+    top: expectFiniteNumber(record.top, `${field}.top`, -200, 200),
+    width: expectFiniteNumber(record.width, `${field}.width`, 1, 20000),
+    opacity: expectFiniteNumber(record.opacity, `${field}.opacity`, 0, 1),
+    rotation: expectFiniteNumber(record.rotation, `${field}.rotation`, -360, 360),
+    depth: expectFiniteNumber(record.depth, `${field}.depth`, 0, 1000),
+  };
+
+  if (record.height !== undefined) {
+    ref.height = expectFiniteNumber(record.height, `${field}.height`, 1, 20000);
+  }
+
+  return ref;
+}
+
+function parseSettings(value: unknown): ApiAccountSettings {
+  if (value === undefined) {
+    return { backgroundDecorations: [] };
+  }
+
+  const record = expectRecord(value, 'settings must be an object');
+  const rawDecorations = record.backgroundDecorations;
+
+  if (rawDecorations !== undefined && !Array.isArray(rawDecorations)) {
+    throw new ValidationError('settings.backgroundDecorations must be an array');
+  }
+
+  const decorationsArray = Array.isArray(rawDecorations) ? rawDecorations : [];
+
+  if (decorationsArray.length > MAX_BACKGROUND_DECORATIONS) {
+    throw new ValidationError(`settings.backgroundDecorations must contain at most ${MAX_BACKGROUND_DECORATIONS} items`);
+  }
+
+  const settings: ApiAccountSettings = {
+    backgroundDecorations: decorationsArray.map((candidate, index) => parseBackgroundRef(candidate, index)),
+  };
+
+  if (record.weatherCityId !== undefined) {
+    const weatherCityId = expectTrimmedString(record.weatherCityId, 'settings.weatherCityId', MAX_WEATHER_CITY_ID_LENGTH);
+
+    if (!WEATHER_CITY_ID_PATTERN.test(weatherCityId)) {
+      throw new ValidationError('settings.weatherCityId must match [a-z0-9-]');
+    }
+
+    settings.weatherCityId = weatherCityId;
+  }
+
+  return settings;
+}
+
 export function parseTasksPayload(value: unknown): PutTasksPayload {
   const record = expectRecord(value, 'Body must be a JSON object');
   const categories = parseCategories(record.categories);
@@ -292,8 +391,23 @@ export function parseTasksPayload(value: unknown): PutTasksPayload {
   return {
     categories,
     tasks: tasks.map((task, index) => parseTask(task, index)),
+    settings: parseSettings(record.settings),
     expectedVersion: expectInteger(record.expectedVersion, 'expectedVersion', 0),
   };
+}
+
+export function parseUploadContentType(header: unknown): string {
+  if (typeof header !== 'string') {
+    throw new ValidationError('Content-Type header is required');
+  }
+
+  const mime = header.split(';')[0].trim().toLowerCase();
+
+  if (!ACCEPTED_IMAGE_MIME.has(mime)) {
+    throw new ValidationError('Unsupported image type');
+  }
+
+  return mime;
 }
 
 export function parseLoginPayload(value: unknown): LoginPayload {

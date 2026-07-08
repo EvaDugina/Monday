@@ -1,4 +1,6 @@
 import type {
+  AccountSettings,
+  BackgroundDecorationRef,
   BackupSnapshotResponse,
   BackupSource,
   CategoryOption,
@@ -75,8 +77,36 @@ async function readJsonResponse<T>(input: RequestInfo | URL, init?: RequestInit)
   return payload as T;
 }
 
+function normalizeAccountSettings(value: unknown): AccountSettings {
+  if (!isRecord(value)) {
+    return { backgroundDecorations: [] };
+  }
+
+  const backgroundDecorations = Array.isArray(value.backgroundDecorations)
+    ? (value.backgroundDecorations as BackgroundDecorationRef[])
+    : [];
+  const settings: AccountSettings = { backgroundDecorations };
+
+  if (typeof value.weatherCityId === 'string') {
+    settings.weatherCityId = value.weatherCityId;
+  }
+
+  return settings;
+}
+
+function normalizeServerTasksState(state: ServerTasksState): ServerTasksState {
+  return {
+    ...state,
+    settings: normalizeAccountSettings((state as { settings?: unknown }).settings),
+  };
+}
+
 export function isConflictStatePayload(value: unknown): value is ServerTasksState {
   return isServerTasksState(value);
+}
+
+export function normalizeConflictState(state: ServerTasksState): ServerTasksState {
+  return normalizeServerTasksState(state);
 }
 
 export async function pullTasksFromServer(): Promise<ServerTasksState> {
@@ -88,12 +118,13 @@ export async function pullTasksFromServer(): Promise<ServerTasksState> {
     throw new Error('Invalid /api/tasks response payload');
   }
 
-  return payload;
+  return normalizeServerTasksState(payload);
 }
 
 export async function pushTasksToServer(
   tasks: Task[],
   categories: CategoryOption[],
+  settings: AccountSettings,
   expectedVersion: number,
 ): Promise<SaveTasksResponse> {
   const payload = await readJsonResponse<SaveTasksResponse>(buildApiPath('tasks'), {
@@ -101,7 +132,7 @@ export async function pushTasksToServer(
     headers: {
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({ categories, tasks, expectedVersion }),
+    body: JSON.stringify({ categories, tasks, settings, expectedVersion }),
   });
 
   if (!isSaveTasksResponse(payload)) {
@@ -109,6 +140,26 @@ export async function pushTasksToServer(
   }
 
   return payload;
+}
+
+export function backgroundImageUrl(imageId: string): string {
+  return buildApiPath(`backgrounds/${encodeURIComponent(imageId)}`);
+}
+
+export async function uploadBackgroundImage(file: Blob): Promise<{ id: string }> {
+  const payload = await readJsonResponse<{ id: string }>(buildApiPath('backgrounds'), {
+    method: 'POST',
+    headers: {
+      'Content-Type': file.type,
+    },
+    body: file,
+  });
+
+  if (!isRecord(payload) || typeof payload.id !== 'string') {
+    throw new Error('Invalid POST /api/backgrounds response payload');
+  }
+
+  return { id: payload.id };
 }
 
 export async function fetchCurrentUser(): Promise<CurrentUser> {

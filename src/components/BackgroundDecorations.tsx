@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 export interface BackgroundDecoration {
   anchor?: 'center';
   id: string;
+  imageId?: string;
   name: string;
   src: string;
   left: number;
