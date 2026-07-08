@@ -29,33 +29,33 @@
 }
 
 .app[data-sky='clear'] {
-  background-color: #bfe1ff;
+  background-color: rgba(191, 225, 255, var(--sky-strength, 1));
 }
 
 .app[data-sky='partly'] {
-  background-color: #d8ecff;
+  background-color: rgba(216, 236, 255, var(--sky-strength, 1));
 }
 
 .app[data-sky='cloudy'] {
-  background-color: #eaf2fa;
+  background-color: rgba(234, 242, 250, var(--sky-strength, 1));
 }
 
 :root[data-theme='dark'] .app[data-sky='clear'] {
-  background-color: #12243d;
+  background-color: rgba(18, 36, 61, var(--sky-strength, 1));
 }
 
 :root[data-theme='dark'] .app[data-sky='partly'] {
-  background-color: #182534;
+  background-color: rgba(24, 37, 52, var(--sky-strength, 1));
 }
 
 :root[data-theme='dark'] .app[data-sky='cloudy'] {
-  background-color: #1b1e24;
+  background-color: rgba(27, 30, 36, var(--sky-strength, 1));
 }
 
 .sky-clouds {
   position: fixed;
   inset: 0;
-  z-index: 0;
+  z-index: 2;
   overflow: hidden;
   pointer-events: none;
 }
@@ -64,47 +64,94 @@
   position: absolute;
   height: auto;
   filter: saturate(0.65) brightness(1.02);
-  will-change: transform;
+  /* Pointer parallax + per-cloud drag offset compose on the independent `translate` property. */
+  translate:
+    calc(var(--parallax-x, 0px) * var(--depth, 1) + var(--offset-x, 0px))
+    calc(var(--parallax-y, 0px) * var(--depth, 1) + var(--offset-y, 0px));
+  will-change: transform, translate, opacity;
   animation: sky-cloud-drift linear infinite;
+  animation-duration: calc(var(--cloud-dur, 120s) / var(--cloud-speed, 1));
+  transition:
+    translate 520ms ease-out,
+    opacity 320ms ease,
+    filter 320ms ease;
 }
 
 :root[data-theme='dark'] .sky-clouds__item {
   filter: brightness(0.45) saturate(0.4);
 }
 
+/* Three clouds in different spots and clearly different sizes: high/medium, low/small, middle/large. */
 .sky-clouds__item--a {
-  top: 7%;
-  width: clamp(200px, 26vw, 360px);
-  opacity: 0.6;
-  animation-duration: 95s;
+  top: 8%;
+  --depth: 1;
+  --offset-x: var(--cloud-a-x, 0px);
+  --offset-y: var(--cloud-a-y, 0px);
+  --cloud-dur: 95s;
+  width: clamp(400px, 50vw, 720px);
+  opacity: calc(0.5 * var(--cloud-opacity, 1));
+  animation-delay: -12s;
 }
 
 .sky-clouds__item--b {
-  top: 19%;
-  width: clamp(150px, 20vw, 280px);
-  opacity: 0.42;
-  animation-duration: 135s;
-  animation-delay: -40s;
+  top: 58%;
+  --depth: 0.55;
+  --offset-x: var(--cloud-b-x, 0px);
+  --offset-y: var(--cloud-b-y, 0px);
+  --cloud-dur: 140s;
+  width: clamp(300px, 40vw, 560px);
+  opacity: calc(0.4 * var(--cloud-opacity, 1));
+  animation-delay: -70s;
 }
 
 .sky-clouds__item--c {
-  top: 2%;
-  width: clamp(240px, 32vw, 460px);
-  opacity: 0.3;
-  animation-duration: 175s;
-  animation-delay: -95s;
+  top: 32%;
+  --depth: 1.5;
+  --offset-x: var(--cloud-c-x, 0px);
+  --offset-y: var(--cloud-c-y, 0px);
+  --cloud-dur: 180s;
+  width: clamp(480px, 62vw, 900px);
+  opacity: calc(0.32 * var(--cloud-opacity, 1));
+  animation-delay: -120s;
 }
 
 .sky-clouds[data-sky='partly'] .sky-clouds__item--a {
-  opacity: 0.4;
+  opacity: calc(0.34 * var(--cloud-opacity, 1));
 }
 
 .sky-clouds[data-sky='partly'] .sky-clouds__item--b {
-  opacity: 0.26;
+  opacity: calc(0.24 * var(--cloud-opacity, 1));
 }
 
 .sky-clouds[data-sky='partly'] .sky-clouds__item--c {
   display: none;
+}
+
+/* While parallax is active (pointer moving) the clouds light up like a hover. */
+html[data-clouds-active='true'] .sky-clouds .sky-clouds__item {
+  opacity: calc(0.9 * var(--cloud-opacity, 1));
+  filter: saturate(0.85) brightness(1.12);
+}
+
+:root[data-theme='dark'][data-clouds-active='true'] .sky-clouds .sky-clouds__item {
+  opacity: calc(0.8 * var(--cloud-opacity, 1));
+  filter: brightness(0.72) saturate(0.5);
+}
+
+/* Weather edit mode: clouds become draggable and pause their drift. */
+.sky-clouds--editing .sky-clouds__item {
+  pointer-events: auto;
+  cursor: grab;
+  animation-play-state: paused;
+  outline: 2px dashed color-mix(in srgb, #1e90ff 70%, transparent);
+  outline-offset: 3px;
+  transition:
+    opacity 320ms ease,
+    filter 320ms ease;
+}
+
+.sky-clouds--editing .sky-clouds__item:active {
+  cursor: grabbing;
 }
 
 @keyframes sky-cloud-drift {
@@ -120,6 +167,7 @@
   .sky-clouds__item {
     animation: none;
     transform: translateX(18vw);
+    transition: none;
   }
 }
 
@@ -557,6 +605,210 @@
 .theme-toggle:hover {
   color: var(--text);
   transform: translateY(-1px);
+}
+
+.weather-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 3px;
+  border: 1px solid color-mix(in srgb, rgba(255, 255, 255, 0.48) 76%, var(--text) 10%);
+  border-radius: 12px;
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.48), rgba(255, 255, 255, 0.2)),
+    color-mix(in srgb, var(--surface) 58%, transparent);
+  box-shadow:
+    0 14px 30px rgba(15, 15, 15, 0.08),
+    inset 0 1px 0 rgba(255, 255, 255, 0.72);
+  backdrop-filter: blur(22px) saturate(1.55);
+  -webkit-backdrop-filter: blur(22px) saturate(1.55);
+}
+
+.weather-control-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  border-radius: 9px;
+  background: transparent;
+  color: color-mix(in srgb, var(--muted) 82%, transparent);
+  cursor: pointer;
+  transition:
+    background-color 120ms ease,
+    color 120ms ease;
+}
+
+.weather-control-btn:hover {
+  color: var(--text);
+  background: var(--hover);
+}
+
+.weather-control-btn--on {
+  color: #1e90ff;
+  background: color-mix(in srgb, #1e90ff 16%, transparent);
+}
+
+.weather-control-btn--gear.weather-control-btn--on {
+  color: var(--text);
+  background: var(--hover);
+}
+
+.weather-edit-bar {
+  position: fixed;
+  left: 50%;
+  top: max(16px, env(safe-area-inset-top, 0px));
+  transform: translateX(-50%);
+  z-index: 21;
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  padding: 7px 8px 7px 14px;
+  border: 1px solid color-mix(in srgb, var(--border) 78%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--surface) 90%, transparent);
+  box-shadow: 0 14px 34px rgba(15, 15, 15, 0.14);
+  backdrop-filter: blur(18px) saturate(1.45);
+  -webkit-backdrop-filter: blur(18px) saturate(1.45);
+  font-size: 0.85rem;
+}
+
+.weather-edit-bar__label {
+  color: var(--muted);
+}
+
+.weather-edit-bar__done {
+  padding: 5px 14px;
+  border: none;
+  border-radius: 999px;
+  background: #1e90ff;
+  color: #fff;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+/* Weather control modal */
+
+.weather-modal__body {
+  gap: 22px;
+}
+
+.weather-modal__section {
+  display: grid;
+  gap: 12px;
+}
+
+.weather-modal__section-title {
+  margin: 0;
+  font-size: 0.78rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+
+.weather-modal__toggles {
+  display: grid;
+  gap: 8px;
+}
+
+.weather-modal__toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
+  transition:
+    border-color 120ms ease,
+    background-color 120ms ease;
+}
+
+.weather-modal__toggle--on {
+  border-color: color-mix(in srgb, #1e90ff 45%, var(--border));
+  background: color-mix(in srgb, #1e90ff 8%, var(--surface));
+}
+
+.weather-modal__toggle-text {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.weather-modal__toggle-label {
+  font-size: 0.92rem;
+  font-weight: 500;
+}
+
+.weather-modal__toggle-hint {
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+.weather-modal__switch {
+  flex: 0 0 auto;
+  position: relative;
+  width: 34px;
+  height: 20px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--muted) 40%, transparent);
+  transition: background-color 140ms ease;
+}
+
+.weather-modal__toggle--on .weather-modal__switch {
+  background: #1e90ff;
+}
+
+.weather-modal__switch-thumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(15, 15, 15, 0.25);
+  transition: transform 140ms ease;
+}
+
+.weather-modal__toggle--on .weather-modal__switch-thumb {
+  transform: translateX(14px);
+}
+
+.weather-modal__slider-row {
+  display: grid;
+  gap: 8px;
+}
+
+.weather-modal__slider-row--disabled {
+  opacity: 0.42;
+}
+
+.weather-modal__slider-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 0.9rem;
+  color: var(--text);
+}
+
+.weather-modal__slider-value {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.weather-modal__slider {
+  width: 100%;
+  accent-color: #1e90ff;
+  cursor: pointer;
 }
 
 .weather-badge {

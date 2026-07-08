@@ -27,6 +27,21 @@ export type SkyCondition = 'none' | 'clear' | 'partly' | 'cloudy';
 
 export type ThemeMode = 'light' | 'dark';
 
+export type CloudId = 'a' | 'b' | 'c';
+
+export interface WeatherControls {
+  rainEnabled: boolean;
+  skyEnabled: boolean;
+  cloudsEnabled: boolean;
+  rainAuto: boolean;
+  rainIntensity: RainIntensity;
+  cloudOpacity: number;
+  cloudParallax: number;
+  cloudSpeed: number;
+  skyStrength: number;
+  cloudOffsets: Record<CloudId, { x: number; y: number }>;
+}
+
 export interface BackgroundDecorationRef {
   id: string;
   imageId: string;

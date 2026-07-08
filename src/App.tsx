@@ -1,5 +1,5 @@
 import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Check, Moon, Save, Sun } from 'lucide-react';
+import { Check, Cloud, CloudRain, Moon, Save, SlidersHorizontal, Sun } from 'lucide-react';
 import {
   ApiError,
   backgroundImageUrl,
@@ -25,6 +25,7 @@ import WeatherRainEffect from './components/WeatherRainEffect';
 
 const CreateTaskModal = lazy(() => import('./components/CreateTaskModal'));
 const TaskDetailsModal = lazy(() => import('./components/TaskDetailsModal'));
+const WeatherControlModal = lazy(() => import('./components/WeatherControlModal'));
 import {
   loadLocalState,
   sanitizeCategories,
@@ -34,9 +35,15 @@ import {
   serializeBoardState,
 } from './storage';
 import { triggerHaptic } from './utils/haptic';
+import {
+  createDefaultWeatherControls,
+  loadWeatherControls,
+  saveWeatherControls,
+} from './weatherControls';
 import type {
   AccountSettings,
   BackgroundDecorationRef,
+  CloudId,
   BackupSnapshotResponse,
   BackupSource,
   Category,
@@ -50,6 +57,7 @@ import type {
   SyncStatus,
   Task,
   ThemeMode,
+  WeatherControls,
 } from './types';
 import {
   CATEGORIES,
@@ -627,12 +635,24 @@ function App() {
   const [weatherRainIntensity, setWeatherRainIntensity] = useState<RainIntensity>('none');
   const [skyCondition, setSkyCondition] = useState<SkyCondition>('none');
   const [theme, setTheme] = useState<ThemeMode>(resolveInitialTheme);
-  const [isWeatherLiveEnabled, setIsWeatherLiveEnabled] = useState(true);
+  const [weatherControls, setWeatherControls] = useState<WeatherControls>(loadWeatherControls);
+  const [isWeatherModalOpen, setIsWeatherModalOpen] = useState(false);
+  const [isWeatherEditMode, setIsWeatherEditMode] = useState(false);
   const latestTasksRef = useRef(tasks);
   const latestCategoriesRef = useRef(categories);
   const latestSettingsRef = useRef<AccountSettings>(initialState.settings);
   const backgroundDecorationsRef = useRef(backgroundDecorations);
   const migrationDoneRef = useRef(false);
+  const skyCloudsIdleTimeoutRef = useRef<number | null>(null);
+  const weatherControlsRef = useRef<WeatherControls>(weatherControls);
+  const cloudDragRef = useRef<{
+    id: CloudId;
+    pointerId: number;
+    startX: number;
+    startY: number;
+    originX: number;
+    originY: number;
+  } | null>(null);
   const serverVersionRef = useRef(serverVersion);
   const serverUpdatedAtRef = useRef(serverUpdatedAt);
   const syncStatusRef = useRef<SyncStatus>(syncStatus);
@@ -976,6 +996,76 @@ function App() {
     return () => window.clearInterval(intervalId);
   }, []);
 
+  useEffect(() => {
+    weatherControlsRef.current = weatherControls;
+    saveWeatherControls(weatherControls);
+  }, [weatherControls]);
+
+  useEffect(() => {
+    // Cloud/sky rendering knobs live as CSS vars on <html> so React never fights imperative writes.
+    const root = document.documentElement;
+    root.style.setProperty('--cloud-opacity', String(weatherControls.cloudOpacity));
+    root.style.setProperty('--cloud-speed', String(weatherControls.cloudSpeed));
+    root.style.setProperty('--sky-strength', String(weatherControls.skyStrength));
+    (['a', 'b', 'c'] as const).forEach((id) => {
+      root.style.setProperty(`--cloud-${id}-x`, `${weatherControls.cloudOffsets[id].x}px`);
+      root.style.setProperty(`--cloud-${id}-y`, `${weatherControls.cloudOffsets[id].y}px`);
+    });
+  }, [weatherControls]);
+
+  useEffect(() => {
+    const root = document.documentElement;
+    const cloudsShown = weatherControls.cloudsEnabled && (skyCondition === 'cloudy' || skyCondition === 'partly');
+
+    root.style.setProperty('--parallax-x', '0px');
+    root.style.setProperty('--parallax-y', '0px');
+    root.removeAttribute('data-clouds-active');
+
+    if (!cloudsShown || isWeatherEditMode) {
+      return;
+    }
+
+    const MAX_SHIFT_PX = 28;
+
+    function handlePointerMove(event: PointerEvent): void {
+      const strength = weatherControlsRef.current.cloudParallax;
+
+      if (strength <= 0) {
+        return;
+      }
+
+      const offsetX = (event.clientX / window.innerWidth - 0.5) * 2;
+      const offsetY = (event.clientY / window.innerHeight - 0.5) * 2;
+
+      // Clouds drift opposite to the pointer for a depth-parallax feel, and light up while moving.
+      root.style.setProperty('--parallax-x', `${(-offsetX * MAX_SHIFT_PX * strength).toFixed(1)}px`);
+      root.style.setProperty('--parallax-y', `${(-offsetY * MAX_SHIFT_PX * strength).toFixed(1)}px`);
+      root.setAttribute('data-clouds-active', 'true');
+
+      if (skyCloudsIdleTimeoutRef.current !== null) {
+        window.clearTimeout(skyCloudsIdleTimeoutRef.current);
+      }
+
+      skyCloudsIdleTimeoutRef.current = window.setTimeout(() => {
+        root.removeAttribute('data-clouds-active');
+        skyCloudsIdleTimeoutRef.current = null;
+      }, 450);
+    }
+
+    window.addEventListener('pointermove', handlePointerMove);
+
+    return () => {
+      window.removeEventListener('pointermove', handlePointerMove);
+
+      if (skyCloudsIdleTimeoutRef.current !== null) {
+        window.clearTimeout(skyCloudsIdleTimeoutRef.current);
+        skyCloudsIdleTimeoutRef.current = null;
+      }
+
+      root.removeAttribute('data-clouds-active');
+    };
+  }, [skyCondition, isWeatherEditMode, weatherControls.cloudsEnabled]);
+
   const toggleTheme = useCallback(() => {
     setTheme((current) => {
       const next: ThemeMode = current === 'dark' ? 'light' : 'dark';
@@ -989,6 +1079,70 @@ function App() {
       return next;
     });
   }, []);
+
+  const updateWeatherControls = useCallback((patch: Partial<WeatherControls>) => {
+    setWeatherControls((current) => ({ ...current, ...patch }));
+  }, []);
+
+  const resetWeatherControls = useCallback(() => {
+    setWeatherControls(createDefaultWeatherControls());
+  }, []);
+
+  const handleWeatherEditModeChange = useCallback((next: boolean) => {
+    setIsWeatherEditMode(next);
+
+    if (next) {
+      setIsWeatherModalOpen(false);
+    }
+  }, []);
+
+  function handleCloudPointerDown(event: React.PointerEvent<HTMLImageElement>, id: CloudId): void {
+    if (!isWeatherEditMode) {
+      return;
+    }
+
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    const origin = weatherControls.cloudOffsets[id];
+    cloudDragRef.current = {
+      id,
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      originX: origin.x,
+      originY: origin.y,
+    };
+  }
+
+  function handleCloudPointerMove(event: React.PointerEvent<HTMLImageElement>): void {
+    const drag = cloudDragRef.current;
+
+    if (!drag || drag.pointerId !== event.pointerId) {
+      return;
+    }
+
+    event.preventDefault();
+    const nextX = Math.round(drag.originX + (event.clientX - drag.startX));
+    const nextY = Math.round(drag.originY + (event.clientY - drag.startY));
+    setWeatherControls((current) => ({
+      ...current,
+      cloudOffsets: { ...current.cloudOffsets, [drag.id]: { x: nextX, y: nextY } },
+    }));
+  }
+
+  function handleCloudPointerEnd(event: React.PointerEvent<HTMLImageElement>): void {
+    const drag = cloudDragRef.current;
+
+    if (!drag || drag.pointerId !== event.pointerId) {
+      return;
+    }
+
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+
+    cloudDragRef.current = null;
+  }
 
   useEffect(() => {
     serverVersionRef.current = serverVersion;
@@ -2026,12 +2180,15 @@ function App() {
     }
   }, []);
 
-  const effectiveRainIntensity: RainIntensity = isWeatherLiveEnabled ? weatherRainIntensity : 'none';
+  const effectiveRainIntensity: RainIntensity = weatherControls.rainEnabled
+    ? weatherControls.rainAuto
+      ? weatherRainIntensity
+      : weatherControls.rainIntensity
+    : 'none';
   const isRainVisible = effectiveRainIntensity !== 'none';
-
-  function toggleWeatherLive(): void {
-    setIsWeatherLiveEnabled((isEnabled) => !isEnabled);
-  }
+  const skyActive: SkyCondition = weatherControls.skyEnabled ? skyCondition : 'none';
+  const areCloudsVisible =
+    weatherControls.cloudsEnabled && (skyCondition === 'cloudy' || skyCondition === 'partly' || isWeatherEditMode);
 
   if (authStatus !== 'authenticated') {
     return <LoginScreen error={authError} isLoading={authStatus === 'loading'} isSubmitting={isAuthSubmitting} onLogin={handleLogin} />;
@@ -2042,17 +2199,31 @@ function App() {
       className={`app${isBackgroundDragActive ? ' app--background-dragging' : ''}${
         isBackgroundEditMode ? ' app--background-editing' : ''
       }${isRainVisible ? ' app--weather-rain' : ''}`}
-      data-sky={skyCondition}
+      data-sky={skyActive}
       onDragEnter={handleBackgroundDragEnter}
       onDragLeave={handleBackgroundDragLeave}
       onDragOver={handleBackgroundDragOver}
       onDrop={handleBackgroundDrop}
     >
-      {(skyCondition === 'cloudy' || skyCondition === 'partly') && (
-        <div className="sky-clouds" data-sky={skyCondition} aria-hidden="true">
-          <img className="sky-clouds__item sky-clouds__item--a" src={SKY_CLOUD_IMAGE} alt="" draggable={false} />
-          <img className="sky-clouds__item sky-clouds__item--b" src={SKY_CLOUD_IMAGE} alt="" draggable={false} />
-          <img className="sky-clouds__item sky-clouds__item--c" src={SKY_CLOUD_IMAGE} alt="" draggable={false} />
+      {areCloudsVisible && (
+        <div
+          className={`sky-clouds${isWeatherEditMode ? ' sky-clouds--editing' : ''}`}
+          data-sky={skyCondition}
+          aria-hidden={!isWeatherEditMode}
+        >
+          {(['a', 'b', 'c'] as const).map((id) => (
+            <img
+              key={id}
+              className={`sky-clouds__item sky-clouds__item--${id}`}
+              src={SKY_CLOUD_IMAGE}
+              alt=""
+              draggable={false}
+              onPointerDown={(event) => handleCloudPointerDown(event, id)}
+              onPointerMove={handleCloudPointerMove}
+              onPointerUp={handleCloudPointerEnd}
+              onPointerCancel={handleCloudPointerEnd}
+            />
+          ))}
         </div>
       )}
       <BackgroundDecorations
@@ -2070,20 +2241,64 @@ function App() {
           onRainIntensityChange={setWeatherRainIntensity}
           onSkyConditionChange={setSkyCondition}
         />
-        <button
-          type="button"
-          role="switch"
-          aria-checked={isWeatherLiveEnabled}
-          aria-label={isWeatherLiveEnabled ? 'Выключить погоду live' : 'Включить погоду live'}
-          className={`weather-rain-toggle${isWeatherLiveEnabled ? ' weather-rain-toggle--active' : ''}`}
-          onClick={toggleWeatherLive}
-        >
-          <span className="weather-rain-toggle__label">погода live</span>
-          <span className="weather-rain-toggle__track" aria-hidden="true">
-            <span className="weather-rain-toggle__thumb" />
-          </span>
-        </button>
+        <div className="weather-controls" role="group" aria-label="Слои погоды">
+          <button
+            type="button"
+            role="switch"
+            aria-checked={weatherControls.rainEnabled}
+            aria-label="Дождь"
+            title="Дождь"
+            className={`weather-control-btn${weatherControls.rainEnabled ? ' weather-control-btn--on' : ''}`}
+            onClick={() => updateWeatherControls({ rainEnabled: !weatherControls.rainEnabled })}
+          >
+            <CloudRain size={15} strokeWidth={2} aria-hidden="true" />
+          </button>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={weatherControls.skyEnabled}
+            aria-label="Небо"
+            title="Небо"
+            className={`weather-control-btn${weatherControls.skyEnabled ? ' weather-control-btn--on' : ''}`}
+            onClick={() => updateWeatherControls({ skyEnabled: !weatherControls.skyEnabled })}
+          >
+            <Sun size={15} strokeWidth={2} aria-hidden="true" />
+          </button>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={weatherControls.cloudsEnabled}
+            aria-label="Облака"
+            title="Облака"
+            className={`weather-control-btn${weatherControls.cloudsEnabled ? ' weather-control-btn--on' : ''}`}
+            onClick={() => updateWeatherControls({ cloudsEnabled: !weatherControls.cloudsEnabled })}
+          >
+            <Cloud size={15} strokeWidth={2} aria-hidden="true" />
+          </button>
+          <button
+            type="button"
+            aria-haspopup="dialog"
+            aria-label="Управление погодой"
+            title="Управление погодой"
+            className={`weather-control-btn weather-control-btn--gear${isWeatherModalOpen ? ' weather-control-btn--on' : ''}`}
+            onClick={() => setIsWeatherModalOpen(true)}
+          >
+            <SlidersHorizontal size={15} strokeWidth={2} aria-hidden="true" />
+          </button>
+        </div>
       </aside>
+      {isWeatherEditMode && (
+        <aside className="weather-edit-bar" aria-label="Редактирование облаков">
+          <span className="weather-edit-bar__label">Перетаскивайте облака</span>
+          <button
+            type="button"
+            className="weather-edit-bar__done"
+            onClick={() => setIsWeatherEditMode(false)}
+          >
+            Готово
+          </button>
+        </aside>
+      )}
       <aside className="theme-widget" aria-label="Тема оформления">
         <button
           type="button"
@@ -2237,6 +2452,19 @@ function App() {
             defaultCategory={activeCategories[0]?.key ?? 'passion'}
             onClose={() => setCreateModalOpen(false)}
             onCreate={createTask}
+          />
+        </Suspense>
+      )}
+
+      {isWeatherModalOpen && (
+        <Suspense fallback={null}>
+          <WeatherControlModal
+            controls={weatherControls}
+            editMode={isWeatherEditMode}
+            onChange={updateWeatherControls}
+            onEditModeChange={handleWeatherEditModeChange}
+            onReset={resetWeatherControls}
+            onClose={() => setIsWeatherModalOpen(false)}
           />
         </Suspense>
       )}
