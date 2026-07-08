@@ -1015,7 +1015,9 @@ function App() {
 
   useEffect(() => {
     const root = document.documentElement;
-    const cloudsShown = weatherControls.cloudsEnabled && (skyCondition === 'cloudy' || skyCondition === 'partly');
+    const cloudsShown = weatherControls.live
+      ? skyCondition === 'cloudy' || skyCondition === 'partly'
+      : weatherControls.cloudsEnabled;
 
     root.style.setProperty('--parallax-x', '0px');
     root.style.setProperty('--parallax-y', '0px');
@@ -1049,7 +1051,7 @@ function App() {
       skyCloudsIdleTimeoutRef.current = window.setTimeout(() => {
         root.removeAttribute('data-clouds-active');
         skyCloudsIdleTimeoutRef.current = null;
-      }, 450);
+      }, 700);
     }
 
     window.addEventListener('pointermove', handlePointerMove);
@@ -1064,7 +1066,7 @@ function App() {
 
       root.removeAttribute('data-clouds-active');
     };
-  }, [skyCondition, isWeatherEditMode, weatherControls.cloudsEnabled]);
+  }, [skyCondition, isWeatherEditMode, weatherControls.cloudsEnabled, weatherControls.live]);
 
   const toggleTheme = useCallback(() => {
     setTheme((current) => {
@@ -2180,15 +2182,28 @@ function App() {
     }
   }, []);
 
-  const effectiveRainIntensity: RainIntensity = weatherControls.rainEnabled
-    ? weatherControls.rainAuto
-      ? weatherRainIntensity
-      : weatherControls.rainIntensity
-    : 'none';
+  // "погода live" = forecast-driven; when off, the widget buttons drive each layer manually and rain is forced on.
+  const isWeatherLive = weatherControls.live;
+  const effectiveRainIntensity: RainIntensity = isWeatherLive
+    ? weatherRainIntensity
+    : weatherControls.rainEnabled
+      ? weatherControls.rainIntensity === 'none'
+        ? 'moderate'
+        : weatherControls.rainIntensity
+      : 'none';
   const isRainVisible = effectiveRainIntensity !== 'none';
-  const skyActive: SkyCondition = weatherControls.skyEnabled ? skyCondition : 'none';
-  const areCloudsVisible =
-    weatherControls.cloudsEnabled && (skyCondition === 'cloudy' || skyCondition === 'partly' || isWeatherEditMode);
+  const skyActive: SkyCondition = isWeatherLive
+    ? skyCondition
+    : weatherControls.skyEnabled
+      ? skyCondition === 'none'
+        ? 'clear'
+        : skyCondition
+      : 'none';
+  const areCloudsVisible = isWeatherEditMode
+    ? true
+    : isWeatherLive
+      ? skyCondition === 'cloudy' || skyCondition === 'partly'
+      : weatherControls.cloudsEnabled;
 
   if (authStatus !== 'authenticated') {
     return <LoginScreen error={authError} isLoading={authStatus === 'loading'} isSubmitting={isAuthSubmitting} onLogin={handleLogin} />;
@@ -2241,13 +2256,27 @@ function App() {
           onRainIntensityChange={setWeatherRainIntensity}
           onSkyConditionChange={setSkyCondition}
         />
+        <button
+          type="button"
+          role="switch"
+          aria-checked={isWeatherLive}
+          aria-label={isWeatherLive ? 'Выключить погоду live' : 'Включить погоду live'}
+          className={`weather-rain-toggle${isWeatherLive ? ' weather-rain-toggle--active' : ''}`}
+          onClick={() => updateWeatherControls({ live: !isWeatherLive })}
+        >
+          <span className="weather-rain-toggle__label">погода live</span>
+          <span className="weather-rain-toggle__track" aria-hidden="true">
+            <span className="weather-rain-toggle__thumb" />
+          </span>
+        </button>
         <div className="weather-controls" role="group" aria-label="Слои погоды">
           <button
             type="button"
             role="switch"
             aria-checked={weatherControls.rainEnabled}
             aria-label="Дождь"
-            title="Дождь"
+            title={isWeatherLive ? 'Выключите «погода live» для ручного управления' : 'Дождь'}
+            disabled={isWeatherLive}
             className={`weather-control-btn${weatherControls.rainEnabled ? ' weather-control-btn--on' : ''}`}
             onClick={() => updateWeatherControls({ rainEnabled: !weatherControls.rainEnabled })}
           >
@@ -2258,7 +2287,8 @@ function App() {
             role="switch"
             aria-checked={weatherControls.skyEnabled}
             aria-label="Небо"
-            title="Небо"
+            title={isWeatherLive ? 'Выключите «погода live» для ручного управления' : 'Небо'}
+            disabled={isWeatherLive}
             className={`weather-control-btn${weatherControls.skyEnabled ? ' weather-control-btn--on' : ''}`}
             onClick={() => updateWeatherControls({ skyEnabled: !weatherControls.skyEnabled })}
           >
@@ -2269,7 +2299,8 @@ function App() {
             role="switch"
             aria-checked={weatherControls.cloudsEnabled}
             aria-label="Облака"
-            title="Облака"
+            title={isWeatherLive ? 'Выключите «погода live» для ручного управления' : 'Облака'}
+            disabled={isWeatherLive}
             className={`weather-control-btn${weatherControls.cloudsEnabled ? ' weather-control-btn--on' : ''}`}
             onClick={() => updateWeatherControls({ cloudsEnabled: !weatherControls.cloudsEnabled })}
           >

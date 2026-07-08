@@ -73,8 +73,8 @@
   animation-duration: calc(var(--cloud-dur, 120s) / var(--cloud-speed, 1));
   transition:
     translate 520ms ease-out,
-    opacity 320ms ease,
-    filter 320ms ease;
+    opacity 2250ms ease-in-out,
+    filter 2250ms ease-in-out;
 }
 
 :root[data-theme='dark'] .sky-clouds__item {
@@ -656,6 +656,12 @@ html[data-clouds-active='true'] .sky-clouds .sky-clouds__item {
   background: var(--hover);
 }
 
+.weather-control-btn:disabled {
+  color: color-mix(in srgb, var(--muted) 42%, transparent);
+  background: transparent;
+  cursor: default;
+}
+
 .weather-edit-bar {
   position: fixed;
   left: 50%;
@@ -709,9 +715,24 @@ html[data-clouds-active='true'] .sky-clouds .sky-clouds__item {
   color: var(--muted);
 }
 
+.weather-modal__note {
+  margin: 0;
+  padding: 9px 12px;
+  border-radius: 8px;
+  background: var(--hover);
+  color: var(--muted);
+  font-size: 0.82rem;
+  line-height: 1.4;
+}
+
 .weather-modal__toggles {
   display: grid;
   gap: 8px;
+}
+
+.weather-modal__toggle:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 
 .weather-modal__toggle {

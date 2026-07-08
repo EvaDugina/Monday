@@ -1,6 +1,6 @@
 import { useEffect, useId } from 'react';
 import type { WeatherControls } from '../types';
-import { RAIN_INTENSITY_LABEL, RAIN_INTENSITY_ORDER } from '../weatherControls';
+import { MANUAL_RAIN_INTENSITIES, RAIN_INTENSITY_LABEL } from '../weatherControls';
 
 interface WeatherControlModalProps {
   controls: WeatherControls;
@@ -19,11 +19,13 @@ function ToggleRow({
   label,
   hint,
   checked,
+  disabled,
   onChange,
 }: {
   label: string;
   hint?: string;
   checked: boolean;
+  disabled?: boolean;
   onChange: (next: boolean) => void;
 }) {
   return (
@@ -31,6 +33,7 @@ function ToggleRow({
       type="button"
       role="switch"
       aria-checked={checked}
+      disabled={disabled}
       className={`weather-modal__toggle${checked ? ' weather-modal__toggle--on' : ''}`}
       onClick={() => onChange(!checked)}
     >
@@ -108,7 +111,8 @@ function WeatherControlModal({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [onClose]);
 
-  const rainIntensityIndex = Math.max(0, RAIN_INTENSITY_ORDER.indexOf(controls.rainIntensity));
+  const live = controls.live;
+  const rainIntensityIndex = Math.max(0, MANUAL_RAIN_INTENSITIES.indexOf(controls.rainIntensity));
 
   return (
     <div className="modal-overlay" onClick={onClose}>
@@ -129,16 +133,28 @@ function WeatherControlModal({
         <div className="modal__body weather-modal__body">
           <section className="weather-modal__section">
             <h3 className="weather-modal__section-title">Слои</h3>
+            {live ? (
+              <p className="weather-modal__note">
+                Слои управляются прогнозом. Выключите «погода&nbsp;live» на виджете для ручного управления.
+              </p>
+            ) : null}
             <div className="weather-modal__toggles">
               <ToggleRow
                 label="Дождь"
                 checked={controls.rainEnabled}
+                disabled={live}
                 onChange={(next) => onChange({ rainEnabled: next })}
               />
-              <ToggleRow label="Небо" checked={controls.skyEnabled} onChange={(next) => onChange({ skyEnabled: next })} />
+              <ToggleRow
+                label="Небо"
+                checked={controls.skyEnabled}
+                disabled={live}
+                onChange={(next) => onChange({ skyEnabled: next })}
+              />
               <ToggleRow
                 label="Облака"
                 checked={controls.cloudsEnabled}
+                disabled={live}
                 onChange={(next) => onChange({ cloudsEnabled: next })}
               />
             </div>
@@ -146,21 +162,15 @@ function WeatherControlModal({
 
           <section className="weather-modal__section">
             <h3 className="weather-modal__section-title">Дождь</h3>
-            <ToggleRow
-              label="Авто по прогнозу"
-              hint={controls.rainAuto ? 'Интенсивность берётся из погоды' : 'Ручная интенсивность'}
-              checked={controls.rainAuto}
-              onChange={(next) => onChange({ rainAuto: next })}
-            />
             <SliderRow
               label="Интенсивность дождя"
               value={rainIntensityIndex}
               min={0}
-              max={RAIN_INTENSITY_ORDER.length - 1}
+              max={MANUAL_RAIN_INTENSITIES.length - 1}
               step={1}
-              displayValue={RAIN_INTENSITY_LABEL[controls.rainIntensity]}
-              disabled={controls.rainAuto || !controls.rainEnabled}
-              onChange={(index) => onChange({ rainIntensity: RAIN_INTENSITY_ORDER[index] })}
+              displayValue={RAIN_INTENSITY_LABEL[MANUAL_RAIN_INTENSITIES[rainIntensityIndex]]}
+              disabled={live || !controls.rainEnabled}
+              onChange={(index) => onChange({ rainIntensity: MANUAL_RAIN_INTENSITIES[index] })}
             />
           </section>
 
@@ -173,7 +183,6 @@ function WeatherControlModal({
               max={1}
               step={0.05}
               displayValue={formatPercent(controls.skyStrength)}
-              disabled={!controls.skyEnabled}
               onChange={(next) => onChange({ skyStrength: next })}
             />
           </section>
@@ -187,7 +196,6 @@ function WeatherControlModal({
               max={2}
               step={0.05}
               displayValue={formatPercent(controls.cloudOpacity)}
-              disabled={!controls.cloudsEnabled}
               onChange={(next) => onChange({ cloudOpacity: next })}
             />
             <SliderRow
@@ -197,7 +205,6 @@ function WeatherControlModal({
               max={3}
               step={0.1}
               displayValue={formatPercent(controls.cloudParallax)}
-              disabled={!controls.cloudsEnabled}
               onChange={(next) => onChange({ cloudParallax: next })}
             />
             <SliderRow
@@ -207,7 +214,6 @@ function WeatherControlModal({
               max={3}
               step={0.1}
               displayValue={`${controls.cloudSpeed.toFixed(1)}×`}
-              disabled={!controls.cloudsEnabled}
               onChange={(next) => onChange({ cloudSpeed: next })}
             />
             <ToggleRow

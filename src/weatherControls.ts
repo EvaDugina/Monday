@@ -6,6 +6,9 @@ const CLOUD_IDS: CloudId[] = ['a', 'b', 'c'];
 
 export const RAIN_INTENSITY_ORDER = RAIN_INTENSITIES;
 
+// Manual rain always shows at least a light shower; "none" is expressed by the rain toggle being off.
+export const MANUAL_RAIN_INTENSITIES: RainIntensity[] = ['light', 'moderate', 'heavy', 'max'];
+
 export const RAIN_INTENSITY_LABEL: Record<RainIntensity, string> = {
   none: 'Нет',
   light: 'Лёгкий',
@@ -24,10 +27,10 @@ function makeOffsets(): Record<CloudId, { x: number; y: number }> {
 
 export function createDefaultWeatherControls(): WeatherControls {
   return {
-    rainEnabled: true,
+    live: true,
+    rainEnabled: false,
     skyEnabled: true,
     cloudsEnabled: true,
-    rainAuto: true,
     rainIntensity: 'moderate',
     cloudOpacity: 1,
     cloudParallax: 1,
@@ -71,10 +74,10 @@ export function sanitizeWeatherControls(value: unknown): WeatherControls {
   });
 
   return {
+    live: bool(record.live, defaults.live),
     rainEnabled: bool(record.rainEnabled, defaults.rainEnabled),
     skyEnabled: bool(record.skyEnabled, defaults.skyEnabled),
     cloudsEnabled: bool(record.cloudsEnabled, defaults.cloudsEnabled),
-    rainAuto: bool(record.rainAuto, defaults.rainAuto),
     rainIntensity: RAIN_INTENSITIES.includes(record.rainIntensity as RainIntensity)
       ? (record.rainIntensity as RainIntensity)
       : defaults.rainIntensity,
