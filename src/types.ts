@@ -27,7 +27,17 @@ export type SkyCondition = 'none' | 'clear' | 'partly' | 'cloudy';
 
 export type ThemeMode = 'light' | 'dark';
 
-export type CloudId = 'a' | 'b' | 'c';
+export interface SkyCloud {
+  id: string;
+  top: number; // % vertical position of the cloud band
+  x: number; // px horizontal drag offset
+  y: number; // px vertical drag offset
+  width: number; // px rendered width (height follows the image aspect ratio)
+  depth: number; // parallax depth multiplier
+  duration: number; // seconds for a full drift cycle
+  opacity: number; // base opacity before the global cloudOpacity multiplier
+  delay: number; // seconds of negative drift phase (spreads clouds out)
+}
 
 export interface WeatherControls {
   live: boolean;
@@ -39,7 +49,7 @@ export interface WeatherControls {
   cloudParallax: number;
   cloudSpeed: number;
   skyStrength: number;
-  cloudOffsets: Record<CloudId, { x: number; y: number }>;
+  clouds: SkyCloud[];
 }
 
 export interface BackgroundDecorationRef {

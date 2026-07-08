@@ -1,4 +1,5 @@
 import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { CSSProperties } from 'react';
 import { Check, Cloud, CloudRain, Moon, Save, SlidersHorizontal, Sun } from 'lucide-react';
 import {
   ApiError,
@@ -36,14 +37,18 @@ import {
 } from './storage';
 import { triggerHaptic } from './utils/haptic';
 import {
+  MAX_CLOUDS,
+  MAX_CLOUD_WIDTH,
+  MIN_CLOUD_WIDTH,
   createDefaultWeatherControls,
+  createSkyCloud,
   loadWeatherControls,
   saveWeatherControls,
 } from './weatherControls';
 import type {
   AccountSettings,
   BackgroundDecorationRef,
-  CloudId,
+  SkyCloud,
   BackupSnapshotResponse,
   BackupSource,
   Category,
@@ -638,6 +643,7 @@ function App() {
   const [weatherControls, setWeatherControls] = useState<WeatherControls>(loadWeatherControls);
   const [isWeatherModalOpen, setIsWeatherModalOpen] = useState(false);
   const [isWeatherEditMode, setIsWeatherEditMode] = useState(false);
+  const [selectedCloudId, setSelectedCloudId] = useState<string | null>(null);
   const latestTasksRef = useRef(tasks);
   const latestCategoriesRef = useRef(categories);
   const latestSettingsRef = useRef<AccountSettings>(initialState.settings);
@@ -646,10 +652,20 @@ function App() {
   const skyCloudsIdleTimeoutRef = useRef<number | null>(null);
   const weatherControlsRef = useRef<WeatherControls>(weatherControls);
   const cloudDragRef = useRef<{
-    id: CloudId;
+    id: string;
     pointerId: number;
     startX: number;
     startY: number;
+    originX: number;
+    originY: number;
+  } | null>(null);
+  const cloudResizeRef = useRef<{
+    id: string;
+    handle: 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right';
+    pointerId: number;
+    startX: number;
+    startWidth: number;
+    aspect: number;
     originX: number;
     originY: number;
   } | null>(null);
@@ -1007,10 +1023,6 @@ function App() {
     root.style.setProperty('--cloud-opacity', String(weatherControls.cloudOpacity));
     root.style.setProperty('--cloud-speed', String(weatherControls.cloudSpeed));
     root.style.setProperty('--sky-strength', String(weatherControls.skyStrength));
-    (['a', 'b', 'c'] as const).forEach((id) => {
-      root.style.setProperty(`--cloud-${id}-x`, `${weatherControls.cloudOffsets[id].x}px`);
-      root.style.setProperty(`--cloud-${id}-y`, `${weatherControls.cloudOffsets[id].y}px`);
-    });
   }, [weatherControls]);
 
   useEffect(() => {
@@ -1028,6 +1040,7 @@ function App() {
     }
 
     const MAX_SHIFT_PX = 28;
+    const SCROLL_GLOW_IDLE_MS = 900;
 
     function handlePointerMove(event: PointerEvent): void {
       const strength = weatherControlsRef.current.cloudParallax;
@@ -1039,9 +1052,13 @@ function App() {
       const offsetX = (event.clientX / window.innerWidth - 0.5) * 2;
       const offsetY = (event.clientY / window.innerHeight - 0.5) * 2;
 
-      // Clouds drift opposite to the pointer for a depth-parallax feel, and light up while moving.
+      // Pointer drives only the depth-parallax shift; brightness stays put so parallax never makes clouds blink.
       root.style.setProperty('--parallax-x', `${(-offsetX * MAX_SHIFT_PX * strength).toFixed(1)}px`);
       root.style.setProperty('--parallax-y', `${(-offsetY * MAX_SHIFT_PX * strength).toFixed(1)}px`);
+    }
+
+    function handleScroll(): void {
+      // Clouds glow while the page scrolls and gently fade back once scrolling settles.
       root.setAttribute('data-clouds-active', 'true');
 
       if (skyCloudsIdleTimeoutRef.current !== null) {
@@ -1051,13 +1068,16 @@ function App() {
       skyCloudsIdleTimeoutRef.current = window.setTimeout(() => {
         root.removeAttribute('data-clouds-active');
         skyCloudsIdleTimeoutRef.current = null;
-      }, 700);
+      }, SCROLL_GLOW_IDLE_MS);
     }
 
     window.addEventListener('pointermove', handlePointerMove);
+    // Capture-phase catches scroll from the window or any inner scroll container.
+    window.addEventListener('scroll', handleScroll, { capture: true, passive: true });
 
     return () => {
       window.removeEventListener('pointermove', handlePointerMove);
+      window.removeEventListener('scroll', handleScroll, { capture: true });
 
       if (skyCloudsIdleTimeoutRef.current !== null) {
         window.clearTimeout(skyCloudsIdleTimeoutRef.current);
@@ -1098,25 +1118,67 @@ function App() {
     }
   }, []);
 
-  function handleCloudPointerDown(event: React.PointerEvent<HTMLImageElement>, id: CloudId): void {
+  useEffect(() => {
     if (!isWeatherEditMode) {
+      setSelectedCloudId(null);
       return;
     }
 
+    setSelectedCloudId((current) =>
+      current && weatherControls.clouds.some((cloud) => cloud.id === current) ? current : null,
+    );
+  }, [isWeatherEditMode, weatherControls.clouds]);
+
+  function patchCloud(id: string, patch: Partial<SkyCloud>): void {
+    setWeatherControls((current) => ({
+      ...current,
+      clouds: current.clouds.map((cloud) => (cloud.id === id ? { ...cloud, ...patch } : cloud)),
+    }));
+  }
+
+  function handleAddCloud(): void {
+    if (weatherControls.clouds.length >= MAX_CLOUDS) {
+      return;
+    }
+
+    const cloud = createSkyCloud();
+    setWeatherControls((current) =>
+      current.clouds.length >= MAX_CLOUDS ? current : { ...current, clouds: [...current.clouds, cloud] },
+    );
+    setSelectedCloudId(cloud.id);
+  }
+
+  function handleDeleteCloud(id: string): void {
+    setWeatherControls((current) => ({
+      ...current,
+      clouds: current.clouds.filter((cloud) => cloud.id !== id),
+    }));
+    setSelectedCloudId((current) => (current === id ? null : current));
+  }
+
+  function handleCloudPointerDown(event: React.PointerEvent<HTMLDivElement>, cloud: SkyCloud): void {
+    if (!isWeatherEditMode || cloudResizeRef.current || event.button !== 0) {
+      return;
+    }
+
+    if (event.target instanceof HTMLElement && event.target.closest('button')) {
+      return;
+    }
+
+    setSelectedCloudId(cloud.id);
     event.preventDefault();
     event.currentTarget.setPointerCapture(event.pointerId);
-    const origin = weatherControls.cloudOffsets[id];
     cloudDragRef.current = {
-      id,
+      id: cloud.id,
       pointerId: event.pointerId,
       startX: event.clientX,
       startY: event.clientY,
-      originX: origin.x,
-      originY: origin.y,
+      originX: cloud.x,
+      originY: cloud.y,
     };
   }
 
-  function handleCloudPointerMove(event: React.PointerEvent<HTMLImageElement>): void {
+  function handleCloudPointerMove(event: React.PointerEvent<HTMLDivElement>): void {
     const drag = cloudDragRef.current;
 
     if (!drag || drag.pointerId !== event.pointerId) {
@@ -1126,13 +1188,10 @@ function App() {
     event.preventDefault();
     const nextX = Math.round(drag.originX + (event.clientX - drag.startX));
     const nextY = Math.round(drag.originY + (event.clientY - drag.startY));
-    setWeatherControls((current) => ({
-      ...current,
-      cloudOffsets: { ...current.cloudOffsets, [drag.id]: { x: nextX, y: nextY } },
-    }));
+    patchCloud(drag.id, { x: nextX, y: nextY });
   }
 
-  function handleCloudPointerEnd(event: React.PointerEvent<HTMLImageElement>): void {
+  function handleCloudPointerEnd(event: React.PointerEvent<HTMLDivElement>): void {
     const drag = cloudDragRef.current;
 
     if (!drag || drag.pointerId !== event.pointerId) {
@@ -1144,6 +1203,73 @@ function App() {
     }
 
     cloudDragRef.current = null;
+  }
+
+  function handleCloudResizePointerDown(
+    event: React.PointerEvent<HTMLButtonElement>,
+    cloud: SkyCloud,
+    handle: 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right',
+  ): void {
+    if (!isWeatherEditMode || event.button !== 0) {
+      return;
+    }
+
+    const frame = event.currentTarget.closest('.sky-clouds__item');
+    const rect = frame?.getBoundingClientRect();
+    const aspect = rect && rect.width > 0 ? rect.height / rect.width : 0.5;
+
+    event.preventDefault();
+    event.stopPropagation();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    setSelectedCloudId(cloud.id);
+    cloudResizeRef.current = {
+      id: cloud.id,
+      handle,
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startWidth: cloud.width,
+      aspect,
+      originX: cloud.x,
+      originY: cloud.y,
+    };
+  }
+
+  function handleCloudResizePointerMove(event: React.PointerEvent<HTMLButtonElement>): void {
+    const resize = cloudResizeRef.current;
+
+    if (!resize || resize.pointerId !== event.pointerId) {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+    // Width is driven by horizontal drag; the opposite corner stays anchored via matching x/y shifts.
+    const signX = resize.handle === 'top-left' || resize.handle === 'bottom-left' ? -1 : 1;
+    const rawWidth = resize.startWidth + signX * (event.clientX - resize.startX);
+    const nextWidth = Math.round(Math.min(Math.max(rawWidth, MIN_CLOUD_WIDTH), MAX_CLOUD_WIDTH));
+    const deltaWidth = nextWidth - resize.startWidth;
+    const affectsLeft = resize.handle === 'top-left' || resize.handle === 'bottom-left';
+    const affectsTop = resize.handle === 'top-left' || resize.handle === 'top-right';
+    const nextX = affectsLeft ? Math.round(resize.originX - deltaWidth) : resize.originX;
+    const nextY = affectsTop ? Math.round(resize.originY - deltaWidth * resize.aspect) : resize.originY;
+
+    patchCloud(resize.id, { width: nextWidth, x: nextX, y: nextY });
+  }
+
+  function handleCloudResizePointerEnd(event: React.PointerEvent<HTMLButtonElement>): void {
+    const resize = cloudResizeRef.current;
+
+    if (!resize || resize.pointerId !== event.pointerId) {
+      return;
+    }
+
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+    cloudResizeRef.current = null;
   }
 
   useEffect(() => {
@@ -2226,19 +2352,65 @@ function App() {
           data-sky={skyCondition}
           aria-hidden={!isWeatherEditMode}
         >
-          {(['a', 'b', 'c'] as const).map((id) => (
-            <img
-              key={id}
-              className={`sky-clouds__item sky-clouds__item--${id}`}
-              src={SKY_CLOUD_IMAGE}
-              alt=""
-              draggable={false}
-              onPointerDown={(event) => handleCloudPointerDown(event, id)}
-              onPointerMove={handleCloudPointerMove}
-              onPointerUp={handleCloudPointerEnd}
-              onPointerCancel={handleCloudPointerEnd}
-            />
-          ))}
+          {weatherControls.clouds.map((cloud) => {
+            const isSelected = isWeatherEditMode && selectedCloudId === cloud.id;
+
+            return (
+              <div
+                key={cloud.id}
+                className={`sky-clouds__item${isSelected ? ' sky-clouds__item--selected' : ''}`}
+                style={
+                  {
+                    top: `${cloud.top}%`,
+                    width: `${cloud.width}px`,
+                    animationDelay: `-${cloud.delay}s`,
+                    '--depth': cloud.depth,
+                    '--offset-x': `${cloud.x}px`,
+                    '--offset-y': `${cloud.y}px`,
+                    '--cloud-dur': `${cloud.duration}s`,
+                    '--base-opacity': cloud.opacity,
+                  } as CSSProperties
+                }
+                onPointerDown={(event) => handleCloudPointerDown(event, cloud)}
+                onPointerMove={handleCloudPointerMove}
+                onPointerUp={handleCloudPointerEnd}
+                onPointerCancel={handleCloudPointerEnd}
+              >
+                <img className="sky-clouds__image" src={SKY_CLOUD_IMAGE} alt="" draggable={false} />
+                {isSelected && (
+                  <>
+                    <button
+                      type="button"
+                      className="sky-clouds__delete"
+                      aria-label="Удалить облако"
+                      title="Удалить облако"
+                      onPointerDown={(event) => event.stopPropagation()}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        handleDeleteCloud(cloud.id);
+                      }}
+                    >
+                      <span aria-hidden="true">×</span>
+                    </button>
+                    {(['top-left', 'top-right', 'bottom-left', 'bottom-right'] as const).map((handle) => (
+                      <button
+                        key={handle}
+                        type="button"
+                        className={`sky-clouds__resize sky-clouds__resize--${handle}`}
+                        aria-label="Изменить размер облака"
+                        title="Изменить размер"
+                        onPointerDown={(event) => handleCloudResizePointerDown(event, cloud, handle)}
+                        onPointerMove={handleCloudResizePointerMove}
+                        onPointerUp={handleCloudResizePointerEnd}
+                        onPointerCancel={handleCloudResizePointerEnd}
+                      />
+                    ))}
+                    <span className="sky-clouds__size-label">{Math.round(cloud.width)}px</span>
+                  </>
+                )}
+              </div>
+            );
+          })}
         </div>
       )}
       <BackgroundDecorations
@@ -2320,7 +2492,20 @@ function App() {
       </aside>
       {isWeatherEditMode && (
         <aside className="weather-edit-bar" aria-label="Редактирование облаков">
-          <span className="weather-edit-bar__label">Перетаскивайте облака</span>
+          <span className="weather-edit-bar__label">Тащите · тяните за углы</span>
+          <button
+            type="button"
+            className="weather-edit-bar__add"
+            onClick={handleAddCloud}
+            disabled={weatherControls.clouds.length >= MAX_CLOUDS}
+            title={
+              weatherControls.clouds.length >= MAX_CLOUDS
+                ? 'Достигнут максимум облаков'
+                : 'Добавить облако'
+            }
+          >
+            + Облако
+          </button>
           <button
             type="button"
             className="weather-edit-bar__done"

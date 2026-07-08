@@ -218,7 +218,7 @@ function WeatherControlModal({
             />
             <ToggleRow
               label="Режим редактирования"
-              hint="Перетаскивайте облака мышью"
+              hint="Двигайте облака, тяните за углы, добавляйте новые"
               checked={editMode}
               onChange={onEditModeChange}
             />
