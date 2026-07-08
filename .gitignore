@@ -7,3 +7,9 @@ dist
 deploy/timeweb.env
 backups/
 design/
+
+# Agent & editor artifacts
+AGENTS.md
+.obsidian/
+.vscode/
+.idea/
