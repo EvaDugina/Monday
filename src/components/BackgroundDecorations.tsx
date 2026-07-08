@@ -59,6 +59,8 @@ interface LayerMetrics {
 
 const MIN_DECORATION_WIDTH = 96;
 const MIN_DECORATION_HEIGHT = 72;
+const DEFAULT_DECORATION_ASPECT = 0.66;
+const RESIZE_HANDLES: ResizeHandle[] = ['top-left', 'top-right', 'bottom-left', 'bottom-right'];
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max);
@@ -77,6 +79,29 @@ function rotateVector(x: number, y: number, degrees: number): { x: number; y: nu
 
 function toLocalDelta(x: number, y: number, degrees: number): { x: number; y: number } {
   return rotateVector(x, y, -degrees);
+}
+
+function getRenderedHeight(decoration: Pick<BackgroundDecoration, 'height' | 'width'>, naturalAspect?: number): number {
+  const naturalHeight = naturalAspect && naturalAspect > 0 ? decoration.width * naturalAspect : undefined;
+  const rawHeight = naturalHeight ?? decoration.height ?? decoration.width * DEFAULT_DECORATION_ASPECT;
+
+  return Math.max(1, Math.round(rawHeight));
+}
+
+function getCornerControlPosition(
+  handle: ResizeHandle,
+  width: number,
+  height: number,
+  rotation: number,
+): { left: number; top: number } {
+  const xSign = handle.endsWith('left') ? -1 : 1;
+  const ySign = handle.startsWith('top') ? -1 : 1;
+  const offset = rotateVector((xSign * width) / 2, (ySign * height) / 2, rotation);
+
+  return {
+    left: width / 2 + offset.x,
+    top: height / 2 + offset.y,
+  };
 }
 
 function getLayerMetrics(layer: HTMLDivElement | null): LayerMetrics {
@@ -106,6 +131,8 @@ function BackgroundDecorations({
   const [dragState, setDragState] = useState<DragState | null>(null);
   const [resizeState, setResizeState] = useState<ResizeState | null>(null);
   const [selectedDecorationId, setSelectedDecorationId] = useState<string | null>(null);
+  // Natural aspect ratio (height / width) of each decoration's loaded image, keyed by id.
+  const [naturalAspects, setNaturalAspects] = useState<Record<string, number>>({});
 
   useEffect(() => {
     if (!isEditing) {
@@ -195,10 +222,10 @@ function BackgroundDecorations({
       return;
     }
 
-    const fallbackHeight = decoration.height ?? decoration.width * 0.66;
+    // Height follows the image's true aspect ratio so the resize box matches the visible picture.
     const layerMetrics = getLayerMetrics(layerRef.current);
     const startWidth = Math.max(decoration.width, MIN_DECORATION_WIDTH);
-    const startHeight = Math.max(decoration.height ?? fallbackHeight, MIN_DECORATION_HEIGHT);
+    const startHeight = Math.max(getRenderedHeight(decoration, naturalAspects[decoration.id]), MIN_DECORATION_HEIGHT);
     const startTopPx = layerMetrics.top + (decoration.top / 100) * layerMetrics.height;
 
     event.preventDefault();
@@ -300,6 +327,19 @@ function BackgroundDecorations({
     setResizeState(null);
   }
 
+  function handleImageLoad(event: React.SyntheticEvent<HTMLImageElement>, decorationId: string): void {
+    const image = event.currentTarget;
+
+    if (!image.naturalWidth || !image.naturalHeight) {
+      return;
+    }
+
+    const aspect = image.naturalHeight / image.naturalWidth;
+    setNaturalAspects((current) =>
+      current[decorationId] === aspect ? current : { ...current, [decorationId]: aspect },
+    );
+  }
+
   return (
     <div
       ref={layerRef}
@@ -311,6 +351,15 @@ function BackgroundDecorations({
         const isResizing = resizeState?.id === decoration.id;
         const isSelected = selectedDecorationId === decoration.id;
         const showControls = isEditing && (isSelected || isDragging || isResizing);
+        // Render the box at the image's true aspect ratio so controls sit on the visible picture.
+        const aspect = naturalAspects[decoration.id];
+        const renderedHeight = getRenderedHeight(decoration, aspect);
+        const deletePosition = getCornerControlPosition(
+          'top-right',
+          decoration.width,
+          renderedHeight,
+          decoration.rotation,
+        );
 
         return (
           <div
@@ -319,12 +368,10 @@ function BackgroundDecorations({
               isDragging ? ' background-decorations__item--dragging' : ''
             }${isResizing ? ' background-decorations__item--resizing' : ''}${
               isSelected ? ' background-decorations__item--selected' : ''
-            }${
-              decoration.height ? ' background-decorations__item--sized' : ''
-            }`}
+            } background-decorations__item--sized`}
             style={{
               left: `calc(50% + ${decoration.left}px)`,
-              height: decoration.height ? `${decoration.height}px` : undefined,
+              height: `${renderedHeight}px`,
               opacity: Math.max(decoration.opacity, 0.78),
               top: `${decoration.top}%`,
               transform: 'translateX(-50%)',
@@ -339,27 +386,44 @@ function BackgroundDecorations({
               className="background-decorations__frame"
               style={{ transform: `rotate(${decoration.rotation}deg)` }}
             >
-              <img className="background-decorations__image" src={decoration.src} alt="" draggable={false} />
+              <img
+                className="background-decorations__image"
+                src={decoration.src}
+                alt=""
+                draggable={false}
+                onLoad={(event) => handleImageLoad(event, decoration.id)}
+              />
               {showControls && (
-                <>
-                  <button
-                    type="button"
-                    className="background-decorations__delete has-tooltip"
-                    aria-label={`Удалить ${decoration.name}`}
-                    data-tooltip="Удалить изображение"
-                    title="Удалить изображение"
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      onDecorationDelete(decoration.id);
-                    }}
-                  >
-                    <X size={15} strokeWidth={2} aria-hidden="true" />
-                  </button>
-                  {(['top-left', 'top-right', 'bottom-left', 'bottom-right'] as const).map((handle) => (
+                <span className="background-decorations__size-label">
+                  {Math.round(decoration.width)} x {Math.round(renderedHeight)}
+                </span>
+              )}
+            </div>
+            {showControls && (
+              <>
+                <button
+                  type="button"
+                  className="background-decorations__delete has-tooltip"
+                  style={{ left: `${deletePosition.left}px`, top: `${deletePosition.top}px` }}
+                  aria-label={`Удалить ${decoration.name}`}
+                  data-tooltip="Удалить изображение"
+                  title="Удалить изображение"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onDecorationDelete(decoration.id);
+                  }}
+                >
+                  <X size={15} strokeWidth={2} aria-hidden="true" />
+                </button>
+                {RESIZE_HANDLES.map((handle) => {
+                  const position = getCornerControlPosition(handle, decoration.width, renderedHeight, decoration.rotation);
+
+                  return (
                     <button
                       key={handle}
                       type="button"
                       className={`background-decorations__resize background-decorations__resize--${handle} has-tooltip`}
+                      style={{ left: `${position.left}px`, top: `${position.top}px` }}
                       aria-label={`Пропорционально изменить размер ${decoration.name}`}
                       data-tooltip="Изменить размер"
                       title="Изменить размер"
@@ -368,13 +432,10 @@ function BackgroundDecorations({
                       onPointerMove={(event) => handleResizePointerMove(event, decoration)}
                       onPointerUp={handleResizePointerEnd}
                     />
-                  ))}
-                  <span className="background-decorations__size-label">
-                    {Math.round(decoration.width)} x {Math.round(decoration.height ?? decoration.width * 0.66)}
-                  </span>
-                </>
-              )}
-            </div>
+                  );
+                })}
+              </>
+            )}
           </div>
         );
       })}

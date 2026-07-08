@@ -357,10 +357,8 @@ html[data-clouds-active='true'] .sky-clouds .sky-clouds__image {
   will-change: opacity;
 }
 
-.background-decorations__delete {
+.background-decorations__item .background-decorations__delete {
   position: absolute;
-  top: -14px;
-  right: -14px;
   z-index: 4;
   display: inline-flex;
   align-items: center;
@@ -375,14 +373,14 @@ html[data-clouds-active='true'] .sky-clouds .sky-clouds__image {
   cursor: pointer;
   opacity: 0;
   box-shadow: 0 10px 24px rgba(15, 15, 15, 0.14);
-  transform: scale(0.92);
+  transform: translate(-50%, -50%) scale(0.92);
   transition:
     opacity 120ms ease,
     transform 120ms ease,
     background-color 120ms ease;
 }
 
-.background-decorations__resize {
+.background-decorations__item .background-decorations__resize {
   position: absolute;
   z-index: 4;
   display: inline-flex;
@@ -398,32 +396,25 @@ html[data-clouds-active='true'] .sky-clouds .sky-clouds__image {
   opacity: 1;
   box-shadow: 0 1px 3px rgba(15, 15, 15, 0.14);
   touch-action: none;
+  transform: translate(-50%, -50%);
   transition:
     background-color 120ms ease,
     transform 120ms ease;
 }
 
 .background-decorations__resize--top-left {
-  top: -8px;
-  left: -8px;
   cursor: nwse-resize;
 }
 
 .background-decorations__resize--top-right {
-  top: -8px;
-  right: -8px;
   cursor: nesw-resize;
 }
 
 .background-decorations__resize--bottom-left {
-  left: -8px;
-  bottom: -8px;
   cursor: nesw-resize;
 }
 
 .background-decorations__resize--bottom-right {
-  right: -8px;
-  bottom: -8px;
   cursor: nwse-resize;
 }
 
@@ -460,14 +451,14 @@ html[data-clouds-active='true'] .sky-clouds .sky-clouds__image {
 
 .background-decorations__item--selected .background-decorations__delete {
   opacity: 1;
-  transform: scale(1);
+  transform: translate(-50%, -50%) scale(1);
 }
 
 @media (hover: hover) {
   .background-decorations__delete:hover,
   .background-decorations__resize:hover {
     background: rgba(255, 255, 255, 0.92);
-    transform: scale(1.08);
+    transform: translate(-50%, -50%) scale(1.08);
   }
 }
 
