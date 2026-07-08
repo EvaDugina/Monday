@@ -1,5 +1,5 @@
 import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Check, Save } from 'lucide-react';
+import { Check, Moon, Save, Sun } from 'lucide-react';
 import {
   ApiError,
   backgroundImageUrl,
@@ -46,8 +46,10 @@ import type {
   RainIntensity,
   Screen,
   ServerTasksState,
+  SkyCondition,
   SyncStatus,
   Task,
+  ThemeMode,
 } from './types';
 import {
   CATEGORIES,
@@ -72,7 +74,29 @@ const SESSION_EXPIRED_MESSAGE = 'Сессия завершилась. Войди
 const BACKGROUND_DECORATIONS_STORAGE_KEY = 'monday:background-decorations';
 const LEGACY_WEATHER_CITY_STORAGE_KEY = 'monday:weather-city';
 const SETTINGS_MIGRATED_STORAGE_KEY = 'monday:settings-migrated';
+const THEME_STORAGE_KEY = 'monday:theme';
 const DEFAULT_WEATHER_CITY_ID = 'moscow';
+const NIGHT_START_HOUR = 23;
+const NIGHT_END_HOUR = 6;
+const SKY_CLOUD_IMAGE = withAppBasePath('/images/cloud.png');
+
+function timeBasedTheme(): ThemeMode {
+  const hour = new Date().getHours();
+  return hour >= NIGHT_START_HOUR || hour < NIGHT_END_HOUR ? 'dark' : 'light';
+}
+
+function loadThemeOverride(): ThemeMode | null {
+  try {
+    const value = window.localStorage.getItem(THEME_STORAGE_KEY);
+    return value === 'light' || value === 'dark' ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+function resolveInitialTheme(): ThemeMode {
+  return loadThemeOverride() ?? timeBasedTheme();
+}
 const MAX_BACKGROUND_DECORATIONS = 6;
 const MAX_BACKGROUND_FILE_BYTES = 5 * 1024 * 1024;
 const ACCEPTED_BACKGROUND_IMAGE_TYPES = new Set(['image/gif', 'image/jpeg', 'image/png', 'image/webp']);
@@ -601,6 +625,8 @@ function App() {
   const [isBackgroundSaveConfirmed, setIsBackgroundSaveConfirmed] = useState(false);
   const [isBackgroundDragActive, setIsBackgroundDragActive] = useState(false);
   const [weatherRainIntensity, setWeatherRainIntensity] = useState<RainIntensity>('none');
+  const [skyCondition, setSkyCondition] = useState<SkyCondition>('none');
+  const [theme, setTheme] = useState<ThemeMode>(resolveInitialTheme);
   const [isWeatherLiveEnabled, setIsWeatherLiveEnabled] = useState(true);
   const latestTasksRef = useRef(tasks);
   const latestCategoriesRef = useRef(categories);
@@ -934,6 +960,35 @@ function App() {
   useEffect(() => {
     latestSettingsRef.current = settings;
   }, [settings]);
+
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme);
+  }, [theme]);
+
+  useEffect(() => {
+    // Follow time-of-day automatically until the user sets an explicit theme override.
+    const intervalId = window.setInterval(() => {
+      if (loadThemeOverride() === null) {
+        setTheme(timeBasedTheme());
+      }
+    }, 60_000);
+
+    return () => window.clearInterval(intervalId);
+  }, []);
+
+  const toggleTheme = useCallback(() => {
+    setTheme((current) => {
+      const next: ThemeMode = current === 'dark' ? 'light' : 'dark';
+
+      try {
+        window.localStorage.setItem(THEME_STORAGE_KEY, next);
+      } catch {
+        // Theme override is a convenience preference; ignore storage failures.
+      }
+
+      return next;
+    });
+  }, []);
 
   useEffect(() => {
     serverVersionRef.current = serverVersion;
@@ -1987,11 +2042,19 @@ function App() {
       className={`app${isBackgroundDragActive ? ' app--background-dragging' : ''}${
         isBackgroundEditMode ? ' app--background-editing' : ''
       }${isRainVisible ? ' app--weather-rain' : ''}`}
+      data-sky={skyCondition}
       onDragEnter={handleBackgroundDragEnter}
       onDragLeave={handleBackgroundDragLeave}
       onDragOver={handleBackgroundDragOver}
       onDrop={handleBackgroundDrop}
     >
+      {(skyCondition === 'cloudy' || skyCondition === 'partly') && (
+        <div className="sky-clouds" data-sky={skyCondition} aria-hidden="true">
+          <img className="sky-clouds__item sky-clouds__item--a" src={SKY_CLOUD_IMAGE} alt="" draggable={false} />
+          <img className="sky-clouds__item sky-clouds__item--b" src={SKY_CLOUD_IMAGE} alt="" draggable={false} />
+          <img className="sky-clouds__item sky-clouds__item--c" src={SKY_CLOUD_IMAGE} alt="" draggable={false} />
+        </div>
+      )}
       <BackgroundDecorations
         decorations={backgroundDecorations}
         isEditing={isBackgroundEditMode}
@@ -2005,6 +2068,7 @@ function App() {
           cityId={weatherCityId ?? DEFAULT_WEATHER_CITY_ID}
           onCityChange={setWeatherCityId}
           onRainIntensityChange={setWeatherRainIntensity}
+          onSkyConditionChange={setSkyCondition}
         />
         <button
           type="button"
@@ -2018,6 +2082,25 @@ function App() {
           <span className="weather-rain-toggle__track" aria-hidden="true">
             <span className="weather-rain-toggle__thumb" />
           </span>
+        </button>
+      </aside>
+      <aside className="theme-widget" aria-label="Тема оформления">
+        <button
+          type="button"
+          role="switch"
+          aria-checked={theme === 'dark'}
+          aria-label={theme === 'dark' ? 'Включить светлую тему' : 'Включить тёмную тему'}
+          className="theme-toggle has-tooltip has-tooltip--end"
+          data-tooltip={theme === 'dark' ? 'Светлая тема' : 'Тёмная тема'}
+          title={theme === 'dark' ? 'Светлая тема' : 'Тёмная тема'}
+          onClick={toggleTheme}
+        >
+          {theme === 'dark' ? (
+            <Sun size={16} strokeWidth={2} aria-hidden="true" />
+          ) : (
+            <Moon size={16} strokeWidth={2} aria-hidden="true" />
+          )}
+          <span className="sr-only">{theme === 'dark' ? 'Светлая тема' : 'Тёмная тема'}</span>
         </button>
       </aside>
       {isBackgroundDragActive && <div className="background-drop-hint">Отпустите изображение на фон</div>}

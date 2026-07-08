@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { buildApiPath, withAppBasePath } from '../basePath';
-import type { RainIntensity } from '../types';
+import type { RainIntensity, SkyCondition } from '../types';
 
 const DEFAULT_CITY_ID = 'moscow';
 const WEATHER_ICON_BASE_PATH = '/weather-icons';
@@ -35,6 +35,24 @@ interface WeatherBadgeProps {
   cityId: string;
   onCityChange: (cityId: string) => void;
   onRainIntensityChange?: (rainIntensity: RainIntensity) => void;
+  onSkyConditionChange?: (condition: SkyCondition) => void;
+}
+
+// Maps WMO weather_code to a coarse sky condition used to tint the background and show clouds.
+function mapSkyCondition(weatherCode: number | null): SkyCondition {
+  if (weatherCode === null) {
+    return 'none';
+  }
+
+  if (weatherCode === 0) {
+    return 'clear';
+  }
+
+  if (weatherCode === 1 || weatherCode === 2) {
+    return 'partly';
+  }
+
+  return 'cloudy';
 }
 
 const RAIN_INTENSITY_RANK: Record<RainIntensity, number> = {
@@ -237,7 +255,7 @@ async function fetchWeather(
   };
 }
 
-function WeatherBadge({ cityId, onCityChange, onRainIntensityChange }: WeatherBadgeProps) {
+function WeatherBadge({ cityId, onCityChange, onRainIntensityChange, onSkyConditionChange }: WeatherBadgeProps) {
   const selectedCity = findCityOption(cityId);
   const [temperature, setTemperature] = useState<string | null>(null);
   const [weatherCode, setWeatherCode] = useState<number | null>(null);
@@ -267,6 +285,7 @@ function WeatherBadge({ cityId, onCityChange, onRainIntensityChange }: WeatherBa
         setWeatherCode(result.weatherCode);
         setIsDay(result.isDay);
         onRainIntensityChange?.(result.rainIntensity);
+        onSkyConditionChange?.(mapSkyCondition(result.weatherCode));
       })
       .catch(() => {
         if (!isActive) {
@@ -278,6 +297,7 @@ function WeatherBadge({ cityId, onCityChange, onRainIntensityChange }: WeatherBa
         setWeatherCode(null);
         setIsDay(null);
         onRainIntensityChange?.('none');
+        onSkyConditionChange?.('none');
       })
       .finally(() => {
         window.clearTimeout(timeoutId);
@@ -292,7 +312,7 @@ function WeatherBadge({ cityId, onCityChange, onRainIntensityChange }: WeatherBa
       window.clearTimeout(timeoutId);
       controller.abort();
     };
-  }, [onRainIntensityChange, selectedCity]);
+  }, [onRainIntensityChange, onSkyConditionChange, selectedCity]);
 
   useEffect(() => {
     if (!isCityMenuOpen) {

@@ -6,7 +6,7 @@
 - Владелец: команда проекта
 - Последнее обновление: 2026-07-08
 - Стадия проекта: `POC B`
-- Версия проекта: `v0.1.31`
+- Версия проекта: `v0.1.32`
 - Предыдущая версия: `не применимо`
 - Следующий целевой этап: `MVP A`
 - Архив финальной версии предыдущего этапа: `не применимо, каноническая пара документов вводится впервые`
@@ -169,6 +169,10 @@
 - Weather:
   - weather badge рендерится вне `app__inner` в левом верхнем углу как `position: absolute` и прокручивается вместе со страницей (не закреплён у верха вьюпорта)
   - выбранный город хранится в `settings.weatherCityId` синхронизируемого board snapshot и одинаков во всех браузерах пользователя; `WeatherBadge` получает `cityId`/`onCityChange` пропсами от `App`
+  - `WeatherBadge` из WMO `weather_code` выводит `SkyCondition` (`clear|partly|cloudy|none`) и отдаёт её в `App` через `onSkyConditionChange`
+- Погодный фон и тема:
+  - `App` кладёт `SkyCondition` в атрибут `data-sky` на `.app`; фон доски голубеет по ясности (`clear` > `partly` > `cloudy`), при `cloudy`/`partly` рендерится слой `.sky-clouds` с дрейфом `public/images/cloud.png`; `prefers-reduced-motion` отключает анимацию
+  - тема (`ThemeMode = light|dark`) ставится атрибутом `data-theme` на `<html>`; переменные тёмной темы — в `src/theme.css` (`:root[data-theme='dark']`); ночью (23:00–06:00) по умолчанию тёмная, ручной выбор сохраняется в `localStorage` (`monday:theme`) и переопределяет авто; переключатель — `.theme-widget` в правом верхнем углу
   - пользователь выбирает город через стилизованный listbox, ручной ввод названия не используется
   - локальный список городов включает `tbilisi`
   - каждая city option содержит `countryCode`, который мапится на локальный SVG-флаг `public/flags/{countryCode}.svg`
@@ -707,3 +711,4 @@
 - `2026-07-07 | v0.1.29 | тип: sync | важность: важно в документации | frontend применяет серверный snapshot при старте, отправляет изменения сразу и автоматически обрабатывает 409 через merge/retry без conflict UI`
 - `2026-07-07 | v0.1.30 | тип: UX | важность: важно в документации | weather live-switch стартует включённым и управляет только видимостью forecast-driven rain-layer`
 - `2026-07-08 | v0.1.31 | тип: UX+data+sync | важность: важно в документации | фон и выбранный город вынесены в account-synced settings внутри board snapshot, байты фоновых изображений — в blob-таблицу background_images с upload/serve эндпоинтами и orphan GC, добавлена одноразовая миграция из localStorage; weather badge больше не закреплён при скролле (TD-008)`
+- `2026-07-08 | v0.1.32 | тип: UX | важность: важно в документации | SkyCondition из weather_code управляет голубизной фона и слоем облаков .sky-clouds; добавлены light/dark темы через data-theme на <html> и переменные :root[data-theme='dark'], авто-тёмная ночью + ручной .theme-widget`

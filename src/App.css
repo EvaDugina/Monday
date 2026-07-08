@@ -23,6 +23,106 @@
   gap: 48px;
 }
 
+/* Forecast-driven sky: the board background tints bluer as the sky gets clearer. */
+.app {
+  transition: background-color 1400ms ease;
+}
+
+.app[data-sky='clear'] {
+  background-color: #bfe1ff;
+}
+
+.app[data-sky='partly'] {
+  background-color: #d8ecff;
+}
+
+.app[data-sky='cloudy'] {
+  background-color: #eaf2fa;
+}
+
+:root[data-theme='dark'] .app[data-sky='clear'] {
+  background-color: #12243d;
+}
+
+:root[data-theme='dark'] .app[data-sky='partly'] {
+  background-color: #182534;
+}
+
+:root[data-theme='dark'] .app[data-sky='cloudy'] {
+  background-color: #1b1e24;
+}
+
+.sky-clouds {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.sky-clouds__item {
+  position: absolute;
+  height: auto;
+  filter: saturate(0.65) brightness(1.02);
+  will-change: transform;
+  animation: sky-cloud-drift linear infinite;
+}
+
+:root[data-theme='dark'] .sky-clouds__item {
+  filter: brightness(0.45) saturate(0.4);
+}
+
+.sky-clouds__item--a {
+  top: 7%;
+  width: clamp(200px, 26vw, 360px);
+  opacity: 0.6;
+  animation-duration: 95s;
+}
+
+.sky-clouds__item--b {
+  top: 19%;
+  width: clamp(150px, 20vw, 280px);
+  opacity: 0.42;
+  animation-duration: 135s;
+  animation-delay: -40s;
+}
+
+.sky-clouds__item--c {
+  top: 2%;
+  width: clamp(240px, 32vw, 460px);
+  opacity: 0.3;
+  animation-duration: 175s;
+  animation-delay: -95s;
+}
+
+.sky-clouds[data-sky='partly'] .sky-clouds__item--a {
+  opacity: 0.4;
+}
+
+.sky-clouds[data-sky='partly'] .sky-clouds__item--b {
+  opacity: 0.26;
+}
+
+.sky-clouds[data-sky='partly'] .sky-clouds__item--c {
+  display: none;
+}
+
+@keyframes sky-cloud-drift {
+  from {
+    transform: translateX(-60vw);
+  }
+  to {
+    transform: translateX(160vw);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sky-clouds__item {
+    animation: none;
+    transform: translateX(18vw);
+  }
+}
+
 .background-decorations {
   position: absolute;
   inset: 0;
@@ -418,6 +518,45 @@
   flex-wrap: wrap;
   gap: 8px;
   max-width: calc(100vw - 32px);
+}
+
+.theme-widget {
+  position: absolute;
+  top: max(16px, env(safe-area-inset-top, 0px));
+  right: max(16px, env(safe-area-inset-right, 0px));
+  z-index: 22;
+  display: flex;
+  align-items: center;
+}
+
+.theme-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: 1px solid color-mix(in srgb, rgba(255, 255, 255, 0.48) 76%, var(--text) 10%);
+  border-radius: 12px;
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.48), rgba(255, 255, 255, 0.2)),
+    color-mix(in srgb, var(--surface) 58%, transparent);
+  color: var(--muted);
+  cursor: pointer;
+  box-shadow:
+    0 14px 30px rgba(15, 15, 15, 0.08),
+    inset 0 1px 0 rgba(255, 255, 255, 0.72),
+    inset 0 -1px 0 rgba(255, 255, 255, 0.18);
+  backdrop-filter: blur(22px) saturate(1.55);
+  -webkit-backdrop-filter: blur(22px) saturate(1.55);
+  transition:
+    color 120ms ease,
+    transform 120ms ease;
+}
+
+.theme-toggle:hover {
+  color: var(--text);
+  transform: translateY(-1px);
 }
 
 .weather-badge {

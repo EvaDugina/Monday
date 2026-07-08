@@ -23,6 +23,10 @@ export type Screen = 'active' | 'archive';
 
 export type RainIntensity = 'none' | 'light' | 'moderate' | 'heavy' | 'max';
 
+export type SkyCondition = 'none' | 'clear' | 'partly' | 'cloudy';
+
+export type ThemeMode = 'light' | 'dark';
+
 export interface BackgroundDecorationRef {
   id: string;
   imageId: string;
