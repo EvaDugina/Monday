@@ -25,8 +25,6 @@ export type RainIntensity = 'none' | 'light' | 'moderate' | 'heavy' | 'max';
 
 export type SkyCondition = 'none' | 'clear' | 'partly' | 'cloudy';
 
-export type ThemeMode = 'light' | 'dark';
-
 export interface SkyCloud {
   id: string;
   top: number; // % vertical position of the cloud band

@@ -40,18 +40,6 @@
   background-color: rgba(234, 242, 250, var(--sky-strength, 1));
 }
 
-:root[data-theme='dark'] .app[data-sky='clear'] {
-  background-color: rgba(18, 36, 61, var(--sky-strength, 1));
-}
-
-:root[data-theme='dark'] .app[data-sky='partly'] {
-  background-color: rgba(24, 37, 52, var(--sky-strength, 1));
-}
-
-:root[data-theme='dark'] .app[data-sky='cloudy'] {
-  background-color: rgba(27, 30, 36, var(--sky-strength, 1));
-}
-
 .sky-clouds {
   position: fixed;
   inset: 0;
@@ -85,10 +73,6 @@
     filter 9000ms cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-:root[data-theme='dark'] .sky-clouds__image {
-  filter: brightness(0.45) saturate(0.4);
-}
-
 .sky-clouds[data-sky='partly'] .sky-clouds__image {
   opacity: calc(var(--base-opacity, 0.4) * var(--cloud-opacity, 1) * 0.7);
 }
@@ -97,11 +81,6 @@
 html[data-clouds-active='true'] .sky-clouds .sky-clouds__image {
   opacity: calc(0.9 * var(--cloud-opacity, 1));
   filter: saturate(0.85) brightness(1.12);
-}
-
-:root[data-theme='dark'][data-clouds-active='true'] .sky-clouds .sky-clouds__image {
-  opacity: calc(0.8 * var(--cloud-opacity, 1));
-  filter: brightness(0.72) saturate(0.5);
 }
 
 /* Weather edit mode: clouds become draggable/resizable and pause their drift. */
@@ -630,7 +609,7 @@ html[data-clouds-active='true'] .sky-clouds .sky-clouds__image {
   max-width: calc(100vw - 32px);
 }
 
-.theme-widget {
+.export-widget {
   position: absolute;
   top: max(16px, env(safe-area-inset-top, 0px));
   right: max(16px, env(safe-area-inset-right, 0px));
@@ -639,7 +618,7 @@ html[data-clouds-active='true'] .sky-clouds .sky-clouds__image {
   align-items: center;
 }
 
-.theme-toggle {
+.export-button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -664,7 +643,12 @@ html[data-clouds-active='true'] .sky-clouds .sky-clouds__image {
     transform 120ms ease;
 }
 
-.theme-toggle:hover {
+.export-button:disabled {
+  cursor: wait;
+  opacity: 0.68;
+}
+
+.export-button:hover:not(:disabled) {
   color: var(--text);
   transform: translateY(-1px);
 }
@@ -2310,10 +2294,12 @@ button:disabled {
 .button:focus-visible,
 .icon-button:focus-visible,
 .link-button:focus-visible,
+.export-button:focus-visible,
 .chip:focus-visible,
 .category-section__archive-button:focus-visible,
 .task-card:focus-visible,
 .task-card__checkbox:focus-visible,
+.task-card__pin-button:focus-visible,
 .task-card__drag-handle:focus-visible {
   outline: none;
   box-shadow: 0 0 0 4px color-mix(in srgb, var(--text) 10%, transparent);
@@ -2527,6 +2513,13 @@ button:disabled {
 
   .task-card__title-cluster {
     flex-basis: 100%;
+    gap: 6px;
+  }
+
+  .task-card__pin-button {
+    width: 32px;
+    min-height: 32px;
+    margin-right: -2px;
   }
 
   .task-card__badge-row {
@@ -2823,10 +2816,45 @@ button:disabled {
 
 /* Pin */
 
-.task-card__pin-icon {
-  color: var(--soon);
-  transform: rotate(45deg);
+.task-card__pin-button {
   flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  min-height: 22px;
+  margin: 0 -2px 0 0;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: color-mix(in srgb, var(--muted) 62%, transparent);
+  cursor: pointer;
+  transition:
+    background-color 120ms ease,
+    color 120ms ease,
+    opacity 120ms ease;
+}
+
+.task-card__pin-button:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.task-card__pin-button--active {
+  color: var(--soon);
+}
+
+.task-card__pin-icon {
+  transform: rotate(45deg);
+  pointer-events: none;
+}
+
+@media (hover: hover) {
+  .task-card__pin-button:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--soon) 9%, transparent);
+    color: var(--soon);
+  }
 }
 
 .toggle-badge--pin {

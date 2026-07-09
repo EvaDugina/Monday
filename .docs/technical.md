@@ -4,9 +4,9 @@
 
 - Статус: approved
 - Владелец: команда проекта
-- Последнее обновление: 2026-07-08
+- Последнее обновление: 2026-07-09
 - Стадия проекта: `POC B`
-- Версия проекта: `v0.1.36`
+- Версия проекта: `v0.1.37`
 - Предыдущая версия: `не применимо`
 - Следующий целевой этап: `MVP A`
 - Архив финальной версии предыдущего этапа: `не применимо, каноническая пара документов вводится впервые`
@@ -59,7 +59,7 @@
 
 ### 2.1. Назначение системы
 
-Система предоставляет веб-доску задач с локальным состоянием, серверным снимком состояния, optimistic concurrency, архивом, резервными снимками и синхронизируемыми через аккаунт настройками (фон + выбранный город погоды; байты фоновых изображений — в отдельном серверном blob-хранилище), а также отдельный hosted-контур с reverse proxy и внешней аутентификацией.
+Система предоставляет веб-доску задач с локальным состоянием, серверным снимком состояния, optimistic concurrency, архивом, резервными снимками, client-side PNG-экспортом активной доски и синхронизируемыми через аккаунт настройками (фон + выбранный город погоды; байты фоновых изображений — в отдельном серверном blob-хранилище), а также отдельный hosted-контур с reverse proxy и внешней аутентификацией.
 
 ### 2.2. Границы системы
 
@@ -76,6 +76,7 @@
 - `BackgroundDecorationRef`: ссылка на фоновое изображение внутри `AccountSettings` — `imageId` + геометрия (`left`, `top`, `width`, `height?`, `opacity`, `rotation`, `depth`); base64 в ссылке запрещён.
 - `AccountSettings`: пользовательские настройки аккаунта внутри board snapshot — `backgroundDecorations: BackgroundDecorationRef[]` и опциональный `weatherCityId`.
 - `WeatherRainLayer`: client-only canvas overlay дождя, включаемый погодным виджетом.
+- `TaskPngExport`: client-only canvas renderer для скачивания отчёта активной доски без серверного API и новых зависимостей.
 - `ServerTasksState`: серверный снимок доски с `tasks`, `categories`, `settings`, `updatedAt` и `version`.
 - `background_images`: серверная blob-таблица байтов фоновых изображений с привязкой к user key.
 - `task_backups`: таблица резервных снимков с привязкой к пользователю-инициатору.
@@ -141,10 +142,16 @@
   - удаление категории доступно только с экрана архива и удаляет задачи этой категории вместе с category entry
 - Task row editing:
   - `TaskItem` открывает модалку редактирования по клику на `task-card__title-cluster`
+  - `task-card__pin-button` переключает `Task.pinned` прямо из карточки, останавливает event propagation и не открывает модалку/drag/swipe
   - inline input для заголовка в строке задачи не рендерится
   - `TaskDetailsModal` редактирует title через обычный text input и сохраняет trimmed title вместе с остальными полями
   - `task-card__title-shell` ограничивает отображаемое название максимумом 90% ширины, а переполнение скрывается через ellipsis и full-title hover
   - per-task category chip/button не рендерится; смена категории задачи выполняется через drag&drop между секциями
+- PNG export:
+  - `src/utils/taskPngExport.ts` рендерит отдельный canvas-отчёт без html-to-canvas зависимостей
+  - кнопка `.export-button` в правом верхнем floating-layer скачивает `monday-tasks-YYYY-MM-DD_HH-mm.png`
+  - вход экспорта — `activeCategories` и уже отсортированный `tasksByCategory`; архивные задачи и archived-категории исключаются
+  - PNG содержит заголовок, timestamp, цвета/названия категорий, счетчики, задачи и метки `закреплено`/`срочно`/дедлайн
 - Backup:
   - UI вызывает `POST /api/backups`
   - API создает или переиспользует последний backup текущей версии
@@ -170,9 +177,9 @@
   - weather badge рендерится вне `app__inner` в левом верхнем углу как `position: absolute` и прокручивается вместе со страницей (не закреплён у верха вьюпорта)
   - выбранный город хранится в `settings.weatherCityId` синхронизируемого board snapshot и одинаков во всех браузерах пользователя; `WeatherBadge` получает `cityId`/`onCityChange` пропсами от `App`
   - `WeatherBadge` из WMO `weather_code` выводит `SkyCondition` (`clear|partly|cloudy|none`) и отдаёт её в `App` через `onSkyConditionChange`
-- Погодный фон и тема:
+- Погодный фон и дневная палитра:
   - `App` кладёт `SkyCondition` в атрибут `data-sky` на `.app`; фон доски голубеет по ясности (`clear` > `partly` > `cloudy`), при `cloudy`/`partly` рендерится слой `.sky-clouds` с дрейфом `public/images/cloud.png`; `prefers-reduced-motion` отключает анимацию
-  - тема (`ThemeMode = light|dark`) ставится атрибутом `data-theme` на `<html>`; переменные тёмной темы — в `src/theme.css` (`:root[data-theme='dark']`); ночью (23:00–06:00) по умолчанию тёмная, ручной выбор сохраняется в `localStorage` (`monday:theme`) и переопределяет авто; переключатель — `.theme-widget` в правом верхнем углу
+  - тёмная тема удалена: `ThemeMode`, `data-theme`, `:root[data-theme='dark']`, авто-переключение по времени и `.theme-widget` больше не используются; при старте `App` чистит legacy `localStorage['monday:theme']`
 - Управление погодой (`WeatherControls`, `src/weatherControls.ts`, localStorage `monday:weather-controls`, не синхронизируется):
   - `WeatherControls.live` («погода live») задаёт режим: при `live` слои идут по прогнозу, а кнопки слоёв на виджете `disabled` (серые); при выключенном `live` кнопки управляют `rainEnabled/skyEnabled/cloudsEnabled` вручную, а дождь показывается принудительно с ручной интенсивностью
   - виджет несёт тумблер «погода live» + кнопки дождь/небо/облака + gear (открывает `WeatherControlModal`); модалка задаёт ручную интенсивность дождя, насыщенность неба, прозрачность/parallax/скорость облаков и режим редактирования (в `live` тумблеры слоёв и интенсивность заблокированы)
@@ -185,10 +192,10 @@
   - каждая city option содержит `countryCode`, который мапится на локальный SVG-флаг `public/flags/{countryCode}.svg`
   - координаты города берутся из клиентского списка, без Open-Meteo Geocoding API
   - клиент вызывает same-origin endpoint `GET /api/weather/current?latitude=...&longitude=...`
-  - API валидирует координаты и через `server/src/weather.ts` вызывает Open-Meteo Forecast для `current=temperature_2m,weather_code,is_day,precipitation`
+  - API валидирует координаты и через `server/src/weather.ts` вызывает Open-Meteo Forecast для `current=temperature_2m,weather_code,precipitation`
   - серверный вызов Open-Meteo подключается к `OPEN_METEO_CONNECT_HOST` с дефолтом `open-meteo.com`, сохраняя SNI/Host `api.open-meteo.com`; это обходит локальный DNS/TLS-перехват, когда `api.open-meteo.com` резолвится в `198.18.0.0/15`
   - запрос погоды прерывается через 8 секунд, чтобы UI не зависал в состоянии загрузки
-  - `weather_code` и `is_day` мапятся на коды Yandex Weather icon set (`skc_d`, `bkn_ra_n`, `ovc_ts` и т.п.)
+  - `weather_code` мапится на дневные коды Yandex Weather icon set (`skc_d`, `bkn_ra_d`, `ovc_ts` и т.п.); ночные варианты не используются
   - итоговая иконка загружается как локальный SVG из `public/weather-icons/{iconCode}.svg` через `withAppBasePath`
   - флаги городов загружаются как локальные SVG из `public/flags/{countryCode}.svg` через `withAppBasePath`; emoji-флаги не используются
   - `WeatherBadge` выводит `RainIntensity = none | light | moderate | heavy | max` из `precipitation` и WMO `weather_code`: drizzle/slight rain дают лёгкий профиль, moderate rain — средний, heavy precipitation — heavy, heavy rain/thunderstorm — max
@@ -281,7 +288,7 @@
   - отсутствие `status` означает активную категорию; archived-категория хранит `status='archived'` и ISO `archivedAt`
 - task row badges:
   - вычисляются на клиенте из существующих `urgent`, `pinned` и `deadline`
-  - `urgent` badge и pin icon рендерятся слева от title; deadline/recurring badges рендерятся справа в той же строке
+  - `urgent` badge и интерактивная pin-кнопка рендерятся слева от title; deadline/recurring badges рендерятся справа в той же строке
   - title cluster открывает edit-modal, title редактируется в модалке; отдельная category-chip кнопка в строке отсутствует
   - не добавляют новые поля в snapshot и не требуют миграции SQLite
 - frontend `BackgroundDecoration` (render/draft):
@@ -333,6 +340,7 @@
 - `POST /api/backgrounds` принимает только whitelisted image `Content-Type` (`gif|jpeg|png|webp`) до 5 MB; это raw-бинарь, а не form-post, поэтому не нарушает JSON-only write-модель CSRF
 - фоновые изображения теперь входят в аккаунт: геометрия — в `settings` snapshot, байты — в `background_images`; base64 в `PUT /api/tasks` запрещён
 - погодный виджет не является частью snapshot API MONDAY; браузер ходит только в same-origin `/api/weather/current`, внешний forecast-запрос выполняет API-сервер, а SVG-иконки и SVG-флаги отдаются как локальные static assets приложения; выбранный город синхронизируется через `settings.weatherCityId`
+- PNG-экспорт активной доски полностью клиентский, не добавляет endpoint и не попадает в snapshot/backup
 - hosted CSP держит `connect-src 'self'`; погодные SVG, SVG-флаги и фоновые изображения (`/api/backgrounds/:id`) остаются в `img-src 'self'`
 
 ## 6. Окружения и конфигурация
@@ -496,8 +504,11 @@
   - отредактировать описание, дедлайн, еженедельный повтор, закрепление и срочность одной задачи
   - открыть модалку редактирования задачи и убедиться, что выбора категории в ней нет
   - изменить название в модалке редактирования задачи, сохранить и убедиться, что новое название отображается в строке задачи
-  - убедиться, что `СРОЧНО` и символ закрепления находятся слева от названия, а дедлайн или повтор вроде `Каждый день` отображается badge справа от названия
+  - нажать булавку на карточке и убедиться, что закрепление переключается без открытия модалки, а задача перемещается в верхнюю группу категории
+  - убедиться, что `СРОЧНО` и активная булавка находятся слева от названия, а дедлайн или повтор вроде `Каждый день` отображается badge справа от названия
   - кликнуть по `task-card__title-cluster` и убедиться, что открылась модалка редактирования задачи
+  - нажать правую верхнюю кнопку скачивания и убедиться, что скачался PNG со всеми активными категориями и открытыми задачами
+  - убедиться, что переключателя темы нет, старый `monday:theme=dark` после reload очищается, а интерфейс остается в дневной светлой палитре
   - убедиться, что inline-редактирование заголовка в строке не появляется, длинное название занимает не больше 90% строки и обрезается с троеточием
   - убедиться, что в header нет кнопок управления фоном и identity-строки пользователя
   - перетащить image-файл на страницу и убедиться, что он появился за доской, выглядит не блекло, а drag&drop задач после этого не сломан
@@ -664,7 +675,7 @@
 - Контекст:
   - пользователю нужна температура дня в отдельном floating badge, но проект не должен добавлять серверные секреты или усложнять API ради вспомогательного UI-виджета.
 - Решение:
-  - использовать Open-Meteo Forecast через same-origin endpoint MONDAY: координаты брать из локального списка городов, forecast `current=temperature_2m,weather_code,is_day,precipitation` использовать для температуры, локальной Yandex light-иконки и canvas rain-overlay; выбранный город синхронизировать через `settings.weatherCityId` (см. `TD-008`), а флаги городов показывать через локальные SVG assets.
+  - использовать Open-Meteo Forecast через same-origin endpoint MONDAY: координаты брать из локального списка городов, forecast `current=temperature_2m,weather_code,precipitation` использовать для температуры, дневной локальной Yandex light-иконки и canvas rain-overlay; выбранный город синхронизировать через `settings.weatherCityId` (см. `TD-008`), а флаги городов показывать через локальные SVG assets.
 - Последствия:
   - доступность погодных данных зависит от внешнего Open-Meteo и сетевого доступа API-сервера, а weather icons, флаги и `raindrop-fx` остаются локальными static assets; выбор города теперь одинаков во всех браузерах пользователя.
 - Связанные планы и требования:
@@ -723,3 +734,4 @@
 - `2026-07-08 | v0.1.34 | тип: UX | важность: важно в документации | WeatherControls.live заменил rainAuto: режим «погода live» (по прогнозу, кнопки слоёв disabled) vs ручной (принудительный дождь); подсветка облаков при parallax замедлена до 2250ms`
 - `2026-07-08 | v0.1.35 | тип: UX | важность: важно в документации | cloudOffsets заменён списком WeatherControls.clouds: SkyCloud[] (per-cloud top/x/y/width/depth/duration/opacity/delay через inline-стили, миграция старого формата); в weather edit-mode добавлены corner-resize (якорь на противоположном углу), add (кнопка «+ Облако», лимит MAX_CLOUDS) и delete отдельного облака`
 - `2026-07-08 | v0.1.36 | тип: UX | важность: важно в документации | подсветка облаков отвязана от parallax (pointermove больше не мигает яркостью, только двигает --parallax-*) и переведена на скролл страницы (data-clouds-active по scroll, capture-phase); переход яркости/фильтра растянут до 9000ms cubic-bezier(0.4, 0, 0.2, 1)`
+- `2026-07-09 | v0.1.37 | тип: UX | важность: важно в документации | добавлен task-card pin toggle и client-side Canvas PNG export, удалены ThemeMode/data-theme/dark CSS и Open-Meteo is_day из weather flow`

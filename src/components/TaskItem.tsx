@@ -38,6 +38,7 @@ interface TaskItemProps {
   onQuickClose?: (taskId: string) => void;
   onTouchDragOver?: (category: Category | null) => void;
   onTouchDrop?: (taskId: string, category: Category) => void;
+  onTogglePinned: (taskId: string) => void;
 }
 
 function TaskItem({
@@ -51,6 +52,7 @@ function TaskItem({
   onQuickClose,
   onTouchDragOver,
   onTouchDrop,
+  onTogglePinned,
 }: TaskItemProps) {
   const urgency = getUrgency(task.deadline);
   const rightBadges = urgency.label ? [{ label: urgency.label, tone: urgency.tone }] : [];
@@ -167,6 +169,13 @@ function TaskItem({
     }
     if (!isClosing) {
       onOpen(task.id);
+    }
+  }
+
+  function handlePinClick(event: React.MouseEvent<HTMLButtonElement>) {
+    event.stopPropagation();
+    if (!isClosing) {
+      onTogglePinned(task.id);
     }
   }
 
@@ -305,7 +314,19 @@ function TaskItem({
 
       <div className="task-card__headline">
         <div className="task-card__title-cluster" onClick={handleTitleClusterClick}>
-          {task.pinned && <Pin className="task-card__pin-icon" size={12} strokeWidth={2.2} aria-label="Закреплено" />}
+          <button
+            type="button"
+            className={`task-card__pin-button has-tooltip${task.pinned ? ' task-card__pin-button--active' : ''}`}
+            aria-label={task.pinned ? 'Открепить задачу' : 'Закрепить задачу'}
+            aria-pressed={task.pinned ? true : false}
+            data-tooltip={task.pinned ? 'Открепить' : 'Закрепить'}
+            title={task.pinned ? 'Открепить задачу' : 'Закрепить задачу'}
+            disabled={isClosing}
+            onClick={handlePinClick}
+            onPointerDown={(event) => event.stopPropagation()}
+          >
+            <Pin className="task-card__pin-icon" size={13} strokeWidth={2.15} aria-hidden="true" />
+          </button>
 
           <span className={`task-card__title-shell${task.urgent ? ' task-card__title-shell--with-inline-badge' : ''}`}>
             <span className="task-card__title">

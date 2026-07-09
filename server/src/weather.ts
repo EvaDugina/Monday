@@ -10,7 +10,6 @@ interface OpenMeteoCurrentPayload {
     precipitation?: number;
     temperature_2m?: number;
     weather_code?: number;
-    is_day?: number;
   };
   current_units?: Record<string, unknown>;
   elevation?: number;
@@ -76,7 +75,7 @@ function requestOpenMeteoJson(path: string): Promise<OpenMeteoCurrentPayload> {
 
 export async function fetchOpenMeteoCurrent(latitude: number, longitude: number): Promise<OpenMeteoCurrentPayload> {
   const searchParams = new URLSearchParams({
-    current: 'temperature_2m,weather_code,is_day,precipitation',
+    current: 'temperature_2m,weather_code,precipitation',
     latitude: String(latitude),
     longitude: String(longitude),
     timezone: 'auto',

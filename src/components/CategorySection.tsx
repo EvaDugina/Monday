@@ -27,6 +27,7 @@ interface CategorySectionProps {
   onTaskDragEnd: () => void;
   onTaskDrop: (taskId: string, category: Category) => void;
   onTaskOpen: (taskId: string) => void;
+  onTaskTogglePinned: (taskId: string) => void;
   onQuickClose: (taskId: string) => void;
 }
 
@@ -50,6 +51,7 @@ function CategorySection({
   onTaskDragEnd,
   onTaskDrop,
   onTaskOpen,
+  onTaskTogglePinned,
   onQuickClose,
 }: CategorySectionProps) {
   const [isEditingLabel, setIsEditingLabel] = useState(false);
@@ -263,6 +265,7 @@ function CategorySection({
               onQuickClose={onQuickClose}
               onTouchDragOver={onDropTargetChange}
               onTouchDrop={onTaskDrop}
+              onTogglePinned={onTaskTogglePinned}
             />
           ))
         ) : isLoading ? (

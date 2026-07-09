@@ -27,7 +27,6 @@ interface ForecastResponse {
     precipitation?: number;
     temperature_2m?: number;
     weather_code?: number;
-    is_day?: number;
   };
 }
 
@@ -140,12 +139,8 @@ function getForecastRainIntensity(current: ForecastResponse['current']): RainInt
   );
 }
 
-function getDayNightSuffix(isDay: boolean | null): 'd' | 'n' {
-  return isDay === false ? 'n' : 'd';
-}
-
-function withDayNight(iconCode: string, isDay: boolean | null): string {
-  return `${iconCode}_${getDayNightSuffix(isDay)}`;
+function withDayIcon(iconCode: string): string {
+  return `${iconCode}_d`;
 }
 
 function getWeatherIconUrl(iconCode: string): string {
@@ -156,20 +151,17 @@ function getWeatherFlagUrl(countryCode: WeatherCountryCode): string {
   return withAppBasePath(`${WEATHER_FLAG_BASE_PATH}/${countryCode}.svg`);
 }
 
-function getWeatherVisual(
-  weatherCode: number | null,
-  isDay: boolean | null,
-): {
+function getWeatherVisual(weatherCode: number | null): {
   iconCode: string;
   label: string;
   tone: 'clear' | 'cloud' | 'drizzle' | 'fog' | 'rain' | 'storm' | 'snow' | 'unknown';
 } {
   if (weatherCode === 0) {
-    return { iconCode: withDayNight('skc', isDay), label: 'Ясно', tone: 'clear' };
+    return { iconCode: withDayIcon('skc'), label: 'Ясно', tone: 'clear' };
   }
 
   if (weatherCode === 1 || weatherCode === 2) {
-    return { iconCode: withDayNight('bkn', isDay), label: 'Переменная облачность', tone: 'cloud' };
+    return { iconCode: withDayIcon('bkn'), label: 'Переменная облачность', tone: 'cloud' };
   }
 
   if (weatherCode === 3) {
@@ -177,15 +169,15 @@ function getWeatherVisual(
   }
 
   if (weatherCode === 45 || weatherCode === 48) {
-    return { iconCode: withDayNight('fg', isDay), label: 'Туман', tone: 'fog' };
+    return { iconCode: withDayIcon('fg'), label: 'Туман', tone: 'fog' };
   }
 
   if (weatherCode === 51 || weatherCode === 53 || weatherCode === 55 || weatherCode === 56 || weatherCode === 57) {
-    return { iconCode: withDayNight('bkn_-ra', isDay), label: 'Морось', tone: 'drizzle' };
+    return { iconCode: withDayIcon('bkn_-ra'), label: 'Морось', tone: 'drizzle' };
   }
 
   if (weatherCode === 61 || weatherCode === 66 || weatherCode === 80) {
-    return { iconCode: withDayNight('bkn_ra', isDay), label: 'Дождь', tone: 'rain' };
+    return { iconCode: withDayIcon('bkn_ra'), label: 'Дождь', tone: 'rain' };
   }
 
   if (weatherCode === 63 || weatherCode === 81) {
@@ -197,11 +189,11 @@ function getWeatherVisual(
   }
 
   if (weatherCode === 71 || weatherCode === 77 || weatherCode === 85) {
-    return { iconCode: withDayNight('bkn_-sn', isDay), label: 'Снег', tone: 'snow' };
+    return { iconCode: withDayIcon('bkn_-sn'), label: 'Снег', tone: 'snow' };
   }
 
   if (weatherCode === 73) {
-    return { iconCode: withDayNight('bkn_sn', isDay), label: 'Снег', tone: 'snow' };
+    return { iconCode: withDayIcon('bkn_sn'), label: 'Снег', tone: 'snow' };
   }
 
   if (weatherCode === 75 || weatherCode === 86) {
@@ -216,13 +208,13 @@ function getWeatherVisual(
     return { iconCode: 'ovc_ts_ha', label: 'Гроза с градом', tone: 'storm' };
   }
 
-  return { iconCode: withDayNight('bkn', isDay), label: 'Погода', tone: 'unknown' };
+  return { iconCode: withDayIcon('bkn'), label: 'Погода', tone: 'unknown' };
 }
 
 async function fetchWeather(
   city: WeatherCityOption,
   signal: AbortSignal,
-): Promise<{ isDay: boolean | null; rainIntensity: RainIntensity; temperature: string; weatherCode: number | null }> {
+): Promise<{ rainIntensity: RainIntensity; temperature: string; weatherCode: number | null }> {
   const forecastUrl = new URL(buildApiPath('weather/current'), window.location.origin);
   forecastUrl.searchParams.set('latitude', String(city.latitude));
   forecastUrl.searchParams.set('longitude', String(city.longitude));
@@ -244,10 +236,6 @@ async function fetchWeather(
   }
 
   return {
-    isDay:
-      typeof forecastPayload.current?.is_day === 'number'
-        ? forecastPayload.current.is_day === 1
-        : null,
     rainIntensity: getForecastRainIntensity(forecastPayload.current),
     temperature: formatTemperature(temperature),
     weatherCode:
@@ -259,12 +247,11 @@ function WeatherBadge({ cityId, onCityChange, onRainIntensityChange, onSkyCondit
   const selectedCity = findCityOption(cityId);
   const [temperature, setTemperature] = useState<string | null>(null);
   const [weatherCode, setWeatherCode] = useState<number | null>(null);
-  const [isDay, setIsDay] = useState<boolean | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [hasError, setHasError] = useState(false);
   const [isCityMenuOpen, setIsCityMenuOpen] = useState(false);
   const cityPickerRef = useRef<HTMLDivElement>(null);
-  const weatherVisual = hasError ? getWeatherVisual(null, true) : getWeatherVisual(weatherCode, isDay);
+  const weatherVisual = getWeatherVisual(hasError ? null : weatherCode);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -283,7 +270,6 @@ function WeatherBadge({ cityId, onCityChange, onRainIntensityChange, onSkyCondit
 
         setTemperature(result.temperature);
         setWeatherCode(result.weatherCode);
-        setIsDay(result.isDay);
         onRainIntensityChange?.(result.rainIntensity);
         onSkyConditionChange?.(mapSkyCondition(result.weatherCode));
       })
@@ -295,7 +281,6 @@ function WeatherBadge({ cityId, onCityChange, onRainIntensityChange, onSkyCondit
         setHasError(true);
         setTemperature(null);
         setWeatherCode(null);
-        setIsDay(null);
         onRainIntensityChange?.('none');
         onSkyConditionChange?.('none');
       })
