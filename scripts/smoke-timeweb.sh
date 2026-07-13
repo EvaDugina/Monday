@@ -69,7 +69,7 @@ wait_for_command 60 docker_compose --env-file "$ENV_FILE_DOCKER" -f "$COMPOSE_FI
   node -e "fetch('http://127.0.0.1:8080${APP_BASE_PATH}/api/health/ready').then((r)=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 
 echo "Checking nginx path redirect..."
-curl -fsS -I "${ROOT_URL}" | grep -qi "^location: ${EXPECTED_REDIRECT_LOCATION}$"
+curl -fsS -I "${ROOT_URL}" | tr -d '\r' | grep -qi "^location: ${EXPECTED_REDIRECT_LOCATION}$"
 
 echo "Checking public health endpoint..."
 curl -fsS "${ROOT_URL}/api/health/ready" | grep -q '"ok":true'
