@@ -75,7 +75,7 @@ echo "Checking public health endpoint..."
 curl -fsS "${ROOT_URL}/api/health/ready" | grep -q '"ok":true'
 
 echo "Checking unauthenticated /api/me..."
-curl -fsS -o /dev/null -w '%{http_code}' "${ROOT_URL}/api/me" | grep -q '^401$'
+curl -sS -o /dev/null -w '%{http_code}' "${ROOT_URL}/api/me" | grep -q '^401$'
 
 if [[ -n "${SMOKE_USERNAME:-}" && -n "${SMOKE_PASSWORD:-}" ]]; then
   echo "Checking login flow..."
