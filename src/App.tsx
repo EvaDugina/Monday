@@ -629,7 +629,6 @@ function App() {
   const latestSettingsRef = useRef<AccountSettings>(initialState.settings);
   const backgroundDecorationsRef = useRef(backgroundDecorations);
   const migrationDoneRef = useRef(false);
-  const skyCloudsIdleTimeoutRef = useRef<number | null>(null);
   const weatherControlsRef = useRef<WeatherControls>(weatherControls);
   const cloudDragRef = useRef<{
     id: string;
@@ -1007,14 +1006,12 @@ function App() {
 
     root.style.setProperty('--parallax-x', '0px');
     root.style.setProperty('--parallax-y', '0px');
-    root.removeAttribute('data-clouds-active');
 
     if (!cloudsShown || isWeatherEditMode) {
       return;
     }
 
     const MAX_SHIFT_PX = 28;
-    const SCROLL_GLOW_IDLE_MS = 900;
 
     function handlePointerMove(event: PointerEvent): void {
       const strength = weatherControlsRef.current.cloudParallax;
@@ -1031,34 +1028,10 @@ function App() {
       root.style.setProperty('--parallax-y', `${(-offsetY * MAX_SHIFT_PX * strength).toFixed(1)}px`);
     }
 
-    function handleScroll(): void {
-      // Clouds glow while the page scrolls and gently fade back once scrolling settles.
-      root.setAttribute('data-clouds-active', 'true');
-
-      if (skyCloudsIdleTimeoutRef.current !== null) {
-        window.clearTimeout(skyCloudsIdleTimeoutRef.current);
-      }
-
-      skyCloudsIdleTimeoutRef.current = window.setTimeout(() => {
-        root.removeAttribute('data-clouds-active');
-        skyCloudsIdleTimeoutRef.current = null;
-      }, SCROLL_GLOW_IDLE_MS);
-    }
-
     window.addEventListener('pointermove', handlePointerMove);
-    // Capture-phase catches scroll from the window or any inner scroll container.
-    window.addEventListener('scroll', handleScroll, { capture: true, passive: true });
 
     return () => {
       window.removeEventListener('pointermove', handlePointerMove);
-      window.removeEventListener('scroll', handleScroll, { capture: true });
-
-      if (skyCloudsIdleTimeoutRef.current !== null) {
-        window.clearTimeout(skyCloudsIdleTimeoutRef.current);
-        skyCloudsIdleTimeoutRef.current = null;
-      }
-
-      root.removeAttribute('data-clouds-active');
     };
   }, [skyCondition, isWeatherEditMode, weatherControls.cloudsEnabled, weatherControls.live]);
 
@@ -2369,7 +2342,6 @@ function App() {
                     '--offset-x': `${cloud.x}px`,
                     '--offset-y': `${cloud.y}px`,
                     '--cloud-dur': `${cloud.duration}s`,
-                    '--base-opacity': cloud.opacity,
                   } as CSSProperties
                 }
                 onPointerDown={(event) => handleCloudPointerDown(event, cloud)}

@@ -1,6 +1,8 @@
 import type { RainIntensity, SkyCloud, WeatherControls } from './types';
 
 const WEATHER_CONTROLS_STORAGE_KEY = 'monday:weather-controls';
+const WEATHER_CONTROLS_VERSION_STORAGE_KEY = 'monday:weather-controls-version';
+const WEATHER_CONTROLS_DEFAULTS_VERSION = '2';
 const RAIN_INTENSITIES: RainIntensity[] = ['none', 'light', 'moderate', 'heavy', 'max'];
 
 export const RAIN_INTENSITY_ORDER = RAIN_INTENSITIES;
@@ -36,10 +38,10 @@ function makeDefaultClouds(): SkyCloud[] {
 
 export function createDefaultWeatherControls(): WeatherControls {
   return {
-    live: true,
+    live: false,
     rainEnabled: false,
-    skyEnabled: true,
-    cloudsEnabled: true,
+    skyEnabled: false,
+    cloudsEnabled: false,
     rainIntensity: 'moderate',
     cloudOpacity: 1,
     cloudParallax: 1,
@@ -153,6 +155,14 @@ export function sanitizeWeatherControls(value: unknown): WeatherControls {
 
 export function loadWeatherControls(): WeatherControls {
   try {
+    const version = window.localStorage.getItem(WEATHER_CONTROLS_VERSION_STORAGE_KEY);
+
+    if (version !== WEATHER_CONTROLS_DEFAULTS_VERSION) {
+      window.localStorage.removeItem(WEATHER_CONTROLS_STORAGE_KEY);
+      window.localStorage.setItem(WEATHER_CONTROLS_VERSION_STORAGE_KEY, WEATHER_CONTROLS_DEFAULTS_VERSION);
+      return createDefaultWeatherControls();
+    }
+
     const raw = window.localStorage.getItem(WEATHER_CONTROLS_STORAGE_KEY);
     return raw ? sanitizeWeatherControls(JSON.parse(raw)) : createDefaultWeatherControls();
   } catch {
@@ -162,6 +172,7 @@ export function loadWeatherControls(): WeatherControls {
 
 export function saveWeatherControls(controls: WeatherControls): void {
   try {
+    window.localStorage.setItem(WEATHER_CONTROLS_VERSION_STORAGE_KEY, WEATHER_CONTROLS_DEFAULTS_VERSION);
     window.localStorage.setItem(WEATHER_CONTROLS_STORAGE_KEY, JSON.stringify(controls));
   } catch {
     // Weather controls are a convenience preference; ignore storage quota/private-mode failures.

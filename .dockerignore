@@ -4,6 +4,7 @@ dist
 .claude
 .obsidian
 backups
+recovery
 .env
 deploy/timeweb.env
 design

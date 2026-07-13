@@ -354,12 +354,10 @@ function BackgroundDecorations({
         // Render the box at the image's true aspect ratio so controls sit on the visible picture.
         const aspect = naturalAspects[decoration.id];
         const renderedHeight = getRenderedHeight(decoration, aspect);
-        const deletePosition = getCornerControlPosition(
-          'top-right',
-          decoration.width,
-          renderedHeight,
-          decoration.rotation,
-        );
+        const deletePosition = {
+          left: decoration.width / 2,
+          top: renderedHeight / 2,
+        };
 
         return (
           <div

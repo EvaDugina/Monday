@@ -1,5 +1,7 @@
 # MONDAY
 
+Стадия: POC B
+
 Канонические документы проекта:
 
 - [`.docs/product.md`](./.docs/product.md) - продуктовый источник истины
@@ -17,6 +19,8 @@ npm run dev
 - API: `http://localhost:3001`
 
 ## Production
+
+Dev и Timeweb production собирают один и тот же React UI и Express API из текущего кода. Ожидаемые различия: dev работает без auth на `/`, Timeweb production работает с обязательным single-user login и `APP_BASE_PATH=/monday`.
 
 ### Timeweb VPS / nginx / `/monday`
 

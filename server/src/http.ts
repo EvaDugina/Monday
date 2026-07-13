@@ -19,6 +19,21 @@ interface SecurityHeadersOptions {
 
 export function securityHeaders({ enableHsts }: SecurityHeadersOptions): RequestHandler {
   return (_request, response, next) => {
+    response.setHeader(
+      'Content-Security-Policy',
+      [
+        "default-src 'self'",
+        "base-uri 'none'",
+        "frame-ancestors 'none'",
+        "object-src 'none'",
+        "form-action 'self'",
+        "img-src 'self' data:",
+        "font-src 'self'",
+        "style-src 'self'",
+        "script-src 'self'",
+        "connect-src 'self'",
+      ].join('; '),
+    );
     response.setHeader('X-Content-Type-Options', 'nosniff');
     response.setHeader('X-Frame-Options', 'DENY');
     response.setHeader('Referrer-Policy', 'no-referrer');

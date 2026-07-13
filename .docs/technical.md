@@ -4,9 +4,9 @@
 
 - Статус: approved
 - Владелец: команда проекта
-- Последнее обновление: 2026-07-09
+- Последнее обновление: 2026-07-13
 - Стадия проекта: `POC B`
-- Версия проекта: `v0.1.37`
+- Версия проекта: `v0.1.39`
 - Предыдущая версия: `не применимо`
 - Следующий целевой этап: `MVP A`
 - Архив финальной версии предыдущего этапа: `не применимо, каноническая пара документов вводится впервые`
@@ -169,7 +169,7 @@
   - в background edit-mode кнопка редактирования заменяется кнопкой сохранения изменений и выхода
   - изменения background edit-mode живут в `backgroundDecorations` state/ref как черновик; `saveBackgroundDecorations` вызывается только при явном save-and-exit
   - отдельный edit-mode поднимает слой над доской, включает pointer-drag изображений и click-selection конкретной картинки
-  - выбранная картинка получает синюю selection-рамку, кнопку удаления, четыре corner resize handles и size-label
+  - выбранная картинка получает синюю selection-рамку, центрированную кнопку удаления, четыре corner resize handles и size-label
   - corner resize меняет `width`, `height`, `left` и `top` пропорционально, сохраняя aspect ratio и противоположный угол как якорь
   - горизонтальная координата хранится как pixel offset от центра фонового слоя; старые процентные `left` без `anchor` мигрируются при чтении из `localStorage`
   - секции категорий используют CSS liquid glass-подложку (`backdrop-filter`, прозрачный фон, блики и граница) с минимальной белой заливкой для читаемости поверх фоновых изображений
@@ -181,11 +181,11 @@
   - `App` кладёт `SkyCondition` в атрибут `data-sky` на `.app`; фон доски голубеет по ясности (`clear` > `partly` > `cloudy`), при `cloudy`/`partly` рендерится слой `.sky-clouds` с дрейфом `public/images/cloud.png`; `prefers-reduced-motion` отключает анимацию
   - тёмная тема удалена: `ThemeMode`, `data-theme`, `:root[data-theme='dark']`, авто-переключение по времени и `.theme-widget` больше не используются; при старте `App` чистит legacy `localStorage['monday:theme']`
 - Управление погодой (`WeatherControls`, `src/weatherControls.ts`, localStorage `monday:weather-controls`, не синхронизируется):
-  - `WeatherControls.live` («погода live») задаёт режим: при `live` слои идут по прогнозу, а кнопки слоёв на виджете `disabled` (серые); при выключенном `live` кнопки управляют `rainEnabled/skyEnabled/cloudsEnabled` вручную, а дождь показывается принудительно с ручной интенсивностью
+  - `WeatherControls.live` («погода live») задаёт режим: при `live` слои идут по прогнозу, а кнопки слоёв на виджете `disabled` (серые); при выключенном `live` кнопки управляют `rainEnabled/skyEnabled/cloudsEnabled` вручную, а дождь показывается принудительно с ручной интенсивностью; дефолт новой версии — `live=false`, `rainEnabled=false`, `skyEnabled=false`, `cloudsEnabled=false`
   - виджет несёт тумблер «погода live» + кнопки дождь/небо/облака + gear (открывает `WeatherControlModal`); модалка задаёт ручную интенсивность дождя, насыщенность неба, прозрачность/parallax/скорость облаков и режим редактирования (в `live` тумблеры слоёв и интенсивность заблокированы)
-  - глобальные параметры (`--cloud-opacity`, `--cloud-speed`, `--sky-strength`, `--parallax-*`) применяются как CSS-переменные на `<html>`, а per-cloud (`--depth`, `--offset-x/y`, `--cloud-dur`, `--base-opacity`, `animation-delay`, `top`, `width`) — как inline-стили на каждом `.sky-clouds__item` — так React не конфликтует с императивной записью; насыщенность неба = alpha `.app[data-sky]`
+  - глобальные параметры (`--cloud-opacity`, `--cloud-speed`, `--sky-strength`, `--parallax-*`) применяются как CSS-переменные на `<html>`, а per-cloud (`--depth`, `--offset-x/y`, `--cloud-dur`, `animation-delay`, `top`, `width`) — как inline-стили на каждом `.sky-clouds__item` — так React не конфликтует с императивной записью; насыщенность неба = alpha `.app[data-sky]`
   - облака хранятся списком `WeatherControls.clouds: SkyCloud[]` (id/top/x/y/width/depth/duration/opacity/delay); старый формат `cloudOffsets` мигрируется в список в `sanitizeWeatherControls`; лимиты `MIN_CLOUD_WIDTH`/`MAX_CLOUD_WIDTH`/`MAX_CLOUDS` в `src/weatherControls.ts`
-  - движение указателя двигает только parallax-сдвиг (`--parallax-*`) и не трогает яркость; подсветка (`data-clouds-active`) включается на скролле страницы и гаснет спустя idle, переход яркости/фильтра — `9000ms cubic-bezier(0.4, 0, 0.2, 1)`
+  - движение указателя двигает только parallax-сдвиг (`--parallax-*`) и не трогает яркость; облака всегда рендерятся в подсвеченном состоянии (`opacity: calc(0.9 * var(--cloud-opacity))`, `filter: saturate(0.85) brightness(1.12)`), а scroll-trigger `data-clouds-active` удалён
   - режим редактирования включает `pointer-events` у облаков и на время редактирования отключает дрейф и parallax; выбранное облако (`sky-clouds__item--selected`) можно перетаскивать (offset x/y), менять размер за четыре угла (якорь — противоположный угол, ширина по горизонтали, высота по aspect) и удалять крестиком; кнопка «+ Облако» в `weather-edit-bar` добавляет облако с рандомизированными depth/drift
   - пользователь выбирает город через стилизованный listbox, ручной ввод названия не используется
   - локальный список городов включает `tbilisi`
@@ -199,7 +199,7 @@
   - итоговая иконка загружается как локальный SVG из `public/weather-icons/{iconCode}.svg` через `withAppBasePath`
   - флаги городов загружаются как локальные SVG из `public/flags/{countryCode}.svg` через `withAppBasePath`; emoji-флаги не используются
   - `WeatherBadge` выводит `RainIntensity = none | light | moderate | heavy | max` из `precipitation` и WMO `weather_code`: drizzle/slight rain дают лёгкий профиль, moderate rain — средний, heavy precipitation — heavy, heavy rain/thunderstorm — max
-  - App хранит `weatherRainIntensity` от прогноза и `isWeatherLiveEnabled: boolean`, который по умолчанию `true`; выключенное состояние скрывает rain-layer, включённое берёт интенсивность из прогноза
+  - App хранит `weatherRainIntensity` от прогноза и `WeatherControls` из `src/weatherControls.ts`; localStorage-версия `monday:weather-controls-version=2` одноразово сбрасывает старые сохранённые дефолты, чтобы `погода live`, дождь, небо и облака стартовали выключенными
   - rain-layer рендерится компонентом `WeatherRainEffect` как fixed canvas overlay: сначала загружается локальный `/vendor/raindrop-fx/index.js`, при ошибке запускается внутренняя canvas-анимация падающих капель
   - `WeatherRainEffect` принимает intensity и мапит её на профили плотности, размера капель, mist opacity и fallback canvas opacity; прежние параметры сохранены как профиль `max`
   - старый CSS/image-паттерн дождя не используется, чтобы дождливое состояние выглядело как живая анимация
@@ -341,7 +341,7 @@
 - фоновые изображения теперь входят в аккаунт: геометрия — в `settings` snapshot, байты — в `background_images`; base64 в `PUT /api/tasks` запрещён
 - погодный виджет не является частью snapshot API MONDAY; браузер ходит только в same-origin `/api/weather/current`, внешний forecast-запрос выполняет API-сервер, а SVG-иконки и SVG-флаги отдаются как локальные static assets приложения; выбранный город синхронизируется через `settings.weatherCityId`
 - PNG-экспорт активной доски полностью клиентский, не добавляет endpoint и не попадает в snapshot/backup
-- hosted CSP держит `connect-src 'self'`; погодные SVG, SVG-флаги и фоновые изображения (`/api/backgrounds/:id`) остаются в `img-src 'self'`
+- hosted CSP выставляется API-сервером для timeweb-контура и Caddy для legacy-контура; `connect-src 'self'`, погодные SVG, SVG-флаги и фоновые изображения (`/api/backgrounds/:id`) остаются в `img-src 'self'`
 
 ## 6. Окружения и конфигурация
 
@@ -389,7 +389,7 @@
 - API отключает `x-powered-by`, ограничивает request body и использует request timeout; `graceful shutdown timeout > requestTimeout`
 - health endpoints `live`, `ready`, `health` служат основой для compose healthchecks и rate-limited
 - production API должен быть закрыт за proxy/auth контуром
-- API выставляет security-заголовки (`X-Content-Type-Options`, `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`, `Cross-Origin-Opener-Policy`, `Cross-Origin-Resource-Policy`, `Permissions-Policy`); `Strict-Transport-Security` включается при `HSTS_ENABLED=true` (авто в production)
+- API выставляет security-заголовки (`Content-Security-Policy`, `X-Content-Type-Options`, `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`, `Cross-Origin-Opener-Policy`, `Cross-Origin-Resource-Policy`, `Permissions-Policy`); `Strict-Transport-Security` включается при `HSTS_ENABLED=true` (авто в production)
 - проверка пароля идёт через асинхронный `crypto.scrypt`, сравнение username — через `timingSafeEqual` над SHA-256 хэшами, чтобы не утекала длина
 - CSRF не защищён отдельным токеном: модель опирается на `SameSite=Lax`, JSON-only API и принудительный `Content-Type: application/json`; нельзя принимать `application/x-www-form-urlencoded`/`multipart` на write-эндпойнтах без явного CSRF-контура
 
@@ -402,6 +402,7 @@
   - redirect на auth
   - security headers
   - недоступность прямой публикации API на host
+- parity-smoke `bash tests/smoke/dev-prod-parity.sh` поднимает изолированные dev и timeweb-prod стеки, проверяет auth boundary и сравнивает начальный board snapshot между контурами
 
 ### 7.4. Ограничения текущего этапа и что не делаем раньше времени
 
@@ -420,6 +421,7 @@
   - `npm run build`
   - `npm run build:api`
   - `./scripts/smoke-production.sh`
+  - `bash tests/smoke/dev-prod-parity.sh`
 
 ### 8.2. Ручная проверка
 
@@ -428,6 +430,7 @@
 - сценарий синхронизации: проверка server-authoritative reload, immediate save, silent 409 retry и статусов `syncing`/`offline`
 - сценарий backup: ручной запуск и повторный вызов без новой версии
 - hosted-сценарий: auth redirect и smoke path
+- dev/prod parity-сценарий: изолированный dev без auth и timeweb-prod с login должны отдавать одинаковый начальный `ServerTasksState`; различия ограничены auth, mount path и hardening headers
 
 ### 8.3. Критерии готовности изменения
 
@@ -517,7 +520,7 @@
   - обновить страницу до сохранения и убедиться, что черновые изменения фона не применились к `localStorage`
   - повторить изменение и нажать кнопку сохранения фона, убедиться, что позиция, ширина и высота изображения сохранились после reload, а hover вне зон категорий слегка повышает яркость/контраст
   - изменить ширину окна и убедиться, что изображение остается примерно в том же месте относительно центра доски
-  - удалить одно изображение кнопкой в правом верхнем углу самой картинки
+  - удалить одно изображение кнопкой в центре самой картинки
   - прокрутить страницу и убедиться, что фоновые изображения прокручиваются вместе с ней и не получают parallax-смещения от движения указателя
   - убедиться, что все видимые категории имеют прозрачную liquid glass-подложку и текст читается поверх загруженных изображений
   - перетащить задачу в другую категорию
@@ -735,3 +738,5 @@
 - `2026-07-08 | v0.1.35 | тип: UX | важность: важно в документации | cloudOffsets заменён списком WeatherControls.clouds: SkyCloud[] (per-cloud top/x/y/width/depth/duration/opacity/delay через inline-стили, миграция старого формата); в weather edit-mode добавлены corner-resize (якорь на противоположном углу), add (кнопка «+ Облако», лимит MAX_CLOUDS) и delete отдельного облака`
 - `2026-07-08 | v0.1.36 | тип: UX | важность: важно в документации | подсветка облаков отвязана от parallax (pointermove больше не мигает яркостью, только двигает --parallax-*) и переведена на скролл страницы (data-clouds-active по scroll, capture-phase); переход яркости/фильтра растянут до 9000ms cubic-bezier(0.4, 0, 0.2, 1)`
 - `2026-07-09 | v0.1.37 | тип: UX | важность: важно в документации | добавлен task-card pin toggle и client-side Canvas PNG export, удалены ThemeMode/data-theme/dark CSS и Open-Meteo is_day из weather flow`
+- `2026-07-09 | v0.1.38 | тип: UX | важность: важно в документации | background delete control перенесён в центр выбранной картинки, scroll glow у облаков удалён в пользу постоянной подсветки, WeatherControls получили новую localStorage-версию с выключенными дефолтными слоями`
+- `2026-07-13 | v0.1.39 | тип: deploy+security | важность: важно для hosted-контура | timeweb-prod получил серверный CSP, backend lock обновлён до audit-clean Express/body-parser/qs, recovery-дампы исключены из git/Docker-контекста, добавлен bash tests/smoke/dev-prod-parity.sh для проверки функционального соответствия dev и prod`
